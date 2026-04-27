@@ -1,0 +1,23 @@
+import { getProfileResponse } from '@/contracts';
+import { errorSchema } from '@/schemas';
+import type { FastifyInstance } from 'fastify';
+
+export const getProfileController = async (app: FastifyInstance) => {
+  app.get(
+    '/profile',
+    {
+      schema: {
+        tags: ['Auth'],
+        summary: 'Get logged user profile',
+        security: [{ cookieAuth: [], bearerAuth: [] }],
+        response: {
+          200: getProfileResponse,
+          401: errorSchema
+        }
+      }
+    },
+    req => {
+      return req.getUser();
+    }
+  );
+};
