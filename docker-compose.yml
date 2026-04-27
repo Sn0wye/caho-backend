@@ -1,4 +1,4 @@
-version: "3.8"
+version: '3.8'
 
 networks:
   caho:
@@ -7,32 +7,32 @@ networks:
 services:
   redis:
     image: redis:latest
-    container_name: redis
+    container_name: caho-redis
     restart: always
     ports:
-      - "6379:6379"
+      - '6379:6379'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD}']
     healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
 
   postgres:
     image: postgres:16
-    container_name: postgres
+    container_name: caho-postgres
     restart: always
     environment:
       POSTGRES_USER: ${DATABASE_USER}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready" ]
+      test: ['CMD', 'pg_isready', '-U', '${DATABASE_USER}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,13 +42,13 @@ services:
     restart: unless-stopped
     env_file: ./caho.env
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/readyz"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:8081/readyz']
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
     ports:
-      - "8081:8081"
+      - '8081:8081'
     networks:
       - caho
     depends_on:

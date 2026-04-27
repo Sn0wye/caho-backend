@@ -40,3 +40,4 @@ package-lock.json
 
 sqlite.db
 dist
+caho.env
