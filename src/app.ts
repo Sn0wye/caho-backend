@@ -22,6 +22,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { db } from './db';
 import { fastifyErrorHandler } from './http/error-handler';
+import { logger, seqStream } from './lib/logger';
 import { authRoutes } from './http/routes/auth';
 import { pingRoute } from './http/routes/ping';
 import { roomRoutes } from './http/routes/room';
@@ -42,12 +43,12 @@ export type App = FastifyInstance<
 >;
 
 export const app = fastify({
-  logger: {
-    transport: {
-      target: '@fastify/one-line-logger'
-    }
-  }
+  logger
 }).withTypeProvider<ZodTypeProvider>();
+
+app.addHook('onClose', async () => {
+  await seqStream?.flush();
+});
 
 app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
