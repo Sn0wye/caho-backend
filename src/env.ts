@@ -16,7 +16,7 @@ export const env = createEnv({
     GOOGLE_REDIRECT_URL: z.string().min(1),
     FRONTEND_AUTH_REDIRECT_URL: z.string().min(1),
     SEQ_URL: z.string().url().optional(),
-    SEQ_API_KEY: z.string().optional(),
+    SEQ_API_KEY: z.string().min(1).optional(),
   },
   runtimeEnv: process.env
 });
