@@ -22,6 +22,13 @@ export interface IRoomService {
   endGame(roomCode: string): Promise<Ranking>;
   joinRoom(input: JoinRoomDTO): Promise<Room>;
   leaveRoom(input: LeaveRoomDTO): Promise<void>;
+  getPlayerRoomCodes(playerId: string): Promise<string[]>;
+  setPlayerActive(
+    roomCode: string,
+    playerId: string,
+    isActive: boolean
+  ): Promise<Player>;
+  allActivePlayersPlayed(roomCode: string): Promise<boolean>;
   getRoomPlayers(roomCode: string): Promise<Player[]>;
   getRoomBlackCardId(roomCode: string): Promise<string | null>;
   updatePlayerInRoom(

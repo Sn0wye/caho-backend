@@ -29,6 +29,7 @@ export const joinRoomController = async (app: App) => {
         isReady: false,
         isHost: false,
         isJudge: false,
+        isActive: true,
         cardIds: []
       };
 

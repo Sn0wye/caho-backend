@@ -32,7 +32,6 @@ import { authPlugin } from './plugins/auth';
 import { checkRoutes } from './http/routes/checks';
 
 // import { csrfPlugin } from './plugins/csrf';
-// import { fastifySocketIO } from './plugins/socketio';
 
 export type App = FastifyInstance<
   RawServerDefault,

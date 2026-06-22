@@ -195,11 +195,41 @@ export class RoomService implements IRoomService {
     const { roomCode, playerId } = input;
 
     try {
-      // TODO: keep player, but mark as inactive instead of deleting
+      // An explicit Leave removes the Player entirely. A connection drop is the
+      // separate path that keeps them as an Inactive Player. See ADR-0002.
       await this.roomPlayersRepository.deletePlayerFromRoom(roomCode, playerId);
     } catch (error) {
       throw new InternalServerError('Erro ao sair da sala.');
     }
+  }
+
+  // Rooms the Player currently belongs to. The per-user WebSocket only knows a
+  // userId, so presence updates use this to find which Rooms to broadcast to.
+  public async getPlayerRoomCodes(playerId: string): Promise<string[]> {
+    return await this.roomPlayersRepository.getRoomCodesByPlayerId(playerId);
+  }
+
+  // Flips a Player's presence. A dropped connection sets `isActive` false (an
+  // Inactive Player, kept in the Room and Ranking); reconnecting sets it true.
+  // See ADR-0002.
+  public async setPlayerActive(
+    roomCode: string,
+    playerId: string,
+    isActive: boolean
+  ): Promise<Player> {
+    return await this.updatePlayerInRoom(roomCode, playerId, { isActive });
+  }
+
+  // True once every active non-Judge Player has played this Round. Inactive
+  // Players are never awaited, so they are excluded from the count. See ADR-0002.
+  public async allActivePlayersPlayed(roomCode: string): Promise<boolean> {
+    const players =
+      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+    const contenders = players.filter(
+      player => player.isActive && !player.isJudge
+    );
+
+    return contenders.every(player => player.isReady);
   }
 
   public async getRoomPlayers(roomCode: string): Promise<Player[]> {

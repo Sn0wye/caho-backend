@@ -7,6 +7,7 @@ export interface IRoomPlayersRepository {
     roomCode: string,
     playerId: string
   ): Promise<Player | undefined>;
+  getRoomCodesByPlayerId(playerId: string): Promise<string[]>;
   updatePlayerInRoom(
     roomCode: string,
     playerId: string,

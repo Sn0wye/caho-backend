@@ -56,13 +56,9 @@ export const playCardsController = async (app: App) => {
         payload: cardsDrawn
       });
 
-      const roomPlayersWithoutJudge = await roomService
-        .getRoomPlayers(roomCode)
-        .then(p => p.filter(player => !player.isJudge));
-
-      const allPlayersReady = roomPlayersWithoutJudge.every(
-        player => player.isReady
-      );
+      // Only active Players are awaited; an Inactive Player never blocks the
+      // Round from reaching the judging phase. See ADR-0002.
+      const allPlayersReady = await roomService.allActivePlayersPlayed(roomCode);
 
       if (allPlayersReady) {
         const roundNumber = await roomService.getRoundNumber(roomCode);
