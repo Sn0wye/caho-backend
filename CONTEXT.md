@@ -26,6 +26,19 @@ The single Player in a Round who does not play cards and instead picks the winni
 answer. Rotates each Round; the previous Judge is excluded from being picked next.
 _Avoid_: czar, card czar, dealer
 
+**Inactive Player**:
+A Player whose connection dropped (e.g. network loss) but who is kept in the Room:
+retained in the Ranking with their score, skipped for Judge rotation, and never
+awaited for a play. Reconnecting makes them active again. The opposite state is
+_active_. Distinct from leaving — see _Leave_.
+_Avoid_: gone, removed, spectator, kicked
+
+**Leave**:
+A Player intentionally exiting a Room (the explicit leave action). The Player is
+removed from the Room entirely — score and membership gone. Distinct from a
+connection drop, which yields an _Inactive Player_ rather than removal.
+_Avoid_: quit, disconnect, drop
+
 ### Game
 
 **Room**:
