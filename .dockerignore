@@ -1,6 +1,15 @@
 node_modules
-.DS_Store
-npm-debug.log
+dist
 .git
 .gitignore
+.env*
+.DS_Store
 *.md
+.github/
+.opencode/
+.agents/
+migrations/
+scripts/
+drizzle.config.ts
+vitest*
+test.html

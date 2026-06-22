@@ -1,40 +1,21 @@
-# check=skip=SecretsUsedInArgOrEnv
-FROM node:22-alpine AS base
+FROM node:24.15.0-alpine AS base
 WORKDIR /app
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable && corepack prepare pnpm@8.15.5 --activate
-RUN npm i -g turbo@2.0.1
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 
-# Stage 1: Prebuild stage
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --prod
+
 FROM base AS builder
-WORKDIR /app
-
-COPY . .
-RUN turbo prune @caho/backend --docker
-
-# Stage 2: Build the application
-FROM base AS installer
-WORKDIR /app
-COPY --from=builder /app/out/json/ .
-COPY --from=builder /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm run build
 
-COPY --from=builder /app/out/full .
-
-# Build the application
-ARG TURBO_TEAM
-ENV TURBO_TEAM=$TURBO_TEAM
- 
-ARG TURBO_TOKEN
-ENV TURBO_TOKEN=$TURBO_TOKEN
-
-RUN pnpm run build --filter=@caho/backend
-
-# Stage 3: Production stage
-FROM base AS runner
+FROM node:24.15.0-alpine AS runner
 WORKDIR /app
 EXPOSE 8081
-CMD ["sh", "-c", "cd apps/backend && pnpm run start"]
-
-COPY --from=installer /app ./
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+CMD ["node", "dist/server.js"]
