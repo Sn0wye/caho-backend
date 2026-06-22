@@ -8,6 +8,7 @@ export type JoinRoomDTO = {
     isHost: boolean;
     isReady: boolean;
     isJudge: boolean;
+    isActive: boolean;
     score: number;
     cardIds: string[];
   };

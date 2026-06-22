@@ -28,6 +28,7 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
       isHost: e.isHost,
       isReady: e.isReady,
       isJudge: e.room.judgeId === e.player.id,
+      isActive: e.isActive,
       cardIds: e.cardIds
     }));
 
@@ -78,8 +79,18 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
       isHost: player.isHost,
       isJudge: player.isJudge,
       isReady: player.isReady,
+      isActive: player.isActive,
       cardIds: player.cardIds
     };
+  }
+
+  async getRoomCodesByPlayerId(playerId: string): Promise<string[]> {
+    const rows = await this.db.query.roomPlayers.findMany({
+      where: eq(roomPlayers.playerId, playerId),
+      columns: { roomCode: true }
+    });
+
+    return rows.map(row => row.roomCode);
   }
 
   async updatePlayerInRoom(
@@ -151,6 +162,7 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
             isReady: player.isReady,
             isHost: player.isHost,
             isJudge: player.isJudge,
+            isActive: player.isActive,
             cardIds: player.cardIds
           })
           .where(

@@ -1,7 +1,38 @@
 import type { App } from '@/app';
+import { logger } from '@/lib/logger';
+import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { z } from 'zod';
 
 export const wsRoutes = async (app: App) => {
+  const roomService = RoomServiceFactory();
+
+  // The per-user socket's close is attributable to a userId (unlike the Room
+  // socket, keyed by Code), so it drives presence: a drop marks the Player
+  // Inactive, a (re)connect marks them active, broadcasting to each Room they
+  // are in. See ADR-0002.
+  const broadcastPresence = async (userId: string, isActive: boolean) => {
+    const roomCodes = await roomService.getPlayerRoomCodes(userId);
+
+    for (const roomCode of roomCodes) {
+      try {
+        const player = await roomService.setPlayerActive(
+          roomCode,
+          userId,
+          isActive
+        );
+
+        await app.pubsub.publish(roomCode, {
+          event: 'room.player-update',
+          payload: player
+        });
+      } catch (error) {
+        // A concurrent Leave can delete the row mid-flight; skip that Room
+        // rather than tear down the socket handler.
+        logger.warn({ userId, roomCode, isActive, error }, 'presence broadcast failed');
+      }
+    }
+  };
+
   app.get(
     '/room/:roomCode',
     {
@@ -43,18 +74,21 @@ export const wsRoutes = async (app: App) => {
       }
     },
     async (conn, req) => {
-      const disconnect = await app.pubsub.subscribe(
-        req.params.userId,
-        message => {
-          conn.socket.send(JSON.stringify(message));
-        }
-      );
+      const { userId } = req.params;
+      const disconnect = await app.pubsub.subscribe(userId, message => {
+        conn.socket.send(JSON.stringify(message));
+      });
+
+      await broadcastPresence(userId, true);
 
       conn.socket.on('ping', () => {
         conn.socket.pong();
       });
 
-      conn.socket.on('close', disconnect);
+      conn.socket.on('close', async () => {
+        await disconnect();
+        await broadcastPresence(userId, false);
+      });
     }
   );
 };

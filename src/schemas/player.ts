@@ -7,6 +7,9 @@ export const playerSchema = z.object({
   isHost: z.coerce.boolean(),
   isReady: z.coerce.boolean().default(false),
   isJudge: z.coerce.boolean().default(false),
+  // Presence: an active Player is connected; a connection drop flips this to
+  // false (an Inactive Player) without removing them from the Room. See ADR-0002.
+  isActive: z.coerce.boolean().default(true),
   score: z.number().int().default(0),
   cardIds: z.array(z.string()).default([])
 });

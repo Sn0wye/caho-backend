@@ -20,6 +20,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
     isHost: false,
     isReady: false,
     isJudge: false,
+    isActive: true,
     score: 0,
     cardIds: [],
     ...overrides
@@ -253,5 +254,93 @@ describe('RoomService.playCards', () => {
     for (const cardId of played) {
       expect(player?.cardIds).not.toContain(cardId);
     }
+  });
+});
+
+describe('RoomService.setPlayerActive', () => {
+  it('marks a Player inactive on drop while keeping them in the Room', async () => {
+    const { service, fakes } = buildService({
+      room: makeRoom(),
+      players: [makePlayer({ id: 'player-dropped' })],
+      rounds: [],
+      playedCards: []
+    });
+
+    const updated = await service.setPlayerActive(
+      ROOM_CODE,
+      'player-dropped',
+      false
+    );
+
+    expect(updated.isActive).toBe(false);
+    const stillThere = await fakes.players.getPlayerFromRoom(
+      ROOM_CODE,
+      'player-dropped'
+    );
+    expect(stillThere).toBeDefined();
+  });
+
+  it('marks a Player active again on reconnect', async () => {
+    const { service } = buildService({
+      room: makeRoom(),
+      players: [makePlayer({ id: 'player-back', isActive: false })],
+      rounds: [],
+      playedCards: []
+    });
+
+    const updated = await service.setPlayerActive(
+      ROOM_CODE,
+      'player-back',
+      true
+    );
+
+    expect(updated.isActive).toBe(true);
+  });
+
+  it('keeps an Inactive Player in the Ranking with their score intact', async () => {
+    const { service, fakes } = buildService({
+      room: makeRoom(),
+      players: [makePlayer({ id: 'player-dropped', score: 3 })],
+      rounds: [],
+      playedCards: []
+    });
+
+    await service.setPlayerActive(ROOM_CODE, 'player-dropped', false);
+
+    const ranking = await fakes.ranking.getRankingByRoomCode(ROOM_CODE);
+    expect(ranking).toContainEqual(
+      expect.objectContaining({ id: 'player-dropped', score: 3 })
+    );
+  });
+});
+
+describe('RoomService.allActivePlayersPlayed', () => {
+  it('ignores Inactive Players when all active Players have played', async () => {
+    const { service } = buildService({
+      room: makeRoom(),
+      players: [
+        makePlayer({ id: 'player-judge', isJudge: true }),
+        makePlayer({ id: 'player-active', isReady: true }),
+        makePlayer({ id: 'player-dropped', isActive: false, isReady: false })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(true);
+  });
+
+  it('is false while an active non-Judge Player has not played', async () => {
+    const { service } = buildService({
+      room: makeRoom(),
+      players: [
+        makePlayer({ id: 'player-judge', isJudge: true }),
+        makePlayer({ id: 'player-active', isReady: false })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(false);
   });
 });

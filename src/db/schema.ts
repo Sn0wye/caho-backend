@@ -158,6 +158,9 @@ export const roomPlayers = pgTable(
     isReady: boolean('is_ready').notNull(),
     isHost: boolean('is_host').notNull(),
     isJudge: boolean('is_judge').notNull(),
+    // Presence flag: a connection drop sets this false (an Inactive Player) while
+    // keeping the row; explicit Leave deletes the row instead. See ADR-0002.
+    isActive: boolean('is_active').notNull().default(true),
     cardIds: varchar('card_ids', { length: 24 })
       .array()
       .notNull()

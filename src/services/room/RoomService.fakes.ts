@@ -67,6 +67,10 @@ export class FakeRoomPlayersRepository implements IRoomPlayersRepository {
     return this.players.get(playerId);
   }
 
+  async getRoomCodesByPlayerId(_playerId: string): Promise<string[]> {
+    return [];
+  }
+
   async updatePlayerInRoom(
     _roomCode: string,
     playerId: string,

@@ -29,6 +29,7 @@ export const createRoomController = async (app: App) => {
         isReady: false,
         isHost: true,
         isJudge: false,
+        isActive: true,
         cardIds: []
       };
 
