@@ -23,6 +23,10 @@ export interface IRoomService {
   joinRoom(input: JoinRoomDTO): Promise<Room>;
   leaveRoom(input: LeaveRoomDTO): Promise<void>;
   getPlayerRoomCodes(playerId: string): Promise<string[]>;
+  handleHostLoss(
+    roomCode: string,
+    departingPlayerId: string
+  ): Promise<HostLossOutcome>;
   setPlayerActive(
     roomCode: string,
     playerId: string,
@@ -75,6 +79,16 @@ export interface IRoomService {
     }[]
   >;
 }
+
+// Outcome of a Host departing (explicit Leave or a connection drop), branched on
+// Room status per ADR-0002. Drives the Room-level broadcast: the Room either ends
+// (always in LOBBY; in IN_PROGRESS only when no active Players remain) or the Host
+// role moves to an active Player. `not-host` means the departing Player was not the
+// Host, so nothing changed. See issue #3.
+export type HostLossOutcome =
+  | { kind: 'not-host' }
+  | { kind: 'room-ended'; ranking: Ranking }
+  | { kind: 'host-reassigned'; newHost: Player };
 
 export type JudgeChooseWinnerDTO = {
   winnerPlayerId: string;
