@@ -1,5 +1,6 @@
 import type { App } from '@/app';
 import { logger } from '@/lib/logger';
+import { broadcastHostLoss } from '@/http/broadcastHostLoss';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { z } from 'zod';
 
@@ -25,6 +26,14 @@ export const wsRoutes = async (app: App) => {
           event: 'room.player-update',
           payload: player
         });
+
+        // A drop that takes the Host triggers status-dependent fallout: the Room
+        // ends (LOBBY, or no active Players left) or the Host role is reassigned.
+        // Only a drop (not a reconnect) can lose the Host. See ADR-0002, issue #3.
+        if (!isActive) {
+          const hostLoss = await roomService.handleHostLoss(roomCode, userId);
+          await broadcastHostLoss(app, roomCode, hostLoss);
+        }
       } catch (error) {
         // A concurrent Leave can delete the row mid-flight; skip that Room
         // rather than tear down the socket handler.

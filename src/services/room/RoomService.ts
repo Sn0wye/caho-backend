@@ -22,6 +22,7 @@ import type {
 } from '@/schemas';
 import { createId } from '@paralleldrive/cuid2';
 import type {
+  HostLossOutcome,
   IRoomService,
   JudgeChooseWinnerDTO,
   JudgePickResult
@@ -207,6 +208,74 @@ export class RoomService implements IRoomService {
   // userId, so presence updates use this to find which Rooms to broadcast to.
   public async getPlayerRoomCodes(playerId: string): Promise<string[]> {
     return await this.roomPlayersRepository.getRoomCodesByPlayerId(playerId);
+  }
+
+  // A Host who Leaves or drops is handled by Room status, not one flat rule
+  // (ADR-0002). In LOBBY the unstarted Room ends. In IN_PROGRESS the Host role
+  // moves to an active Player so the game continues; if none remain the Room ends.
+  // Both Leave (row already deleted) and drop (row marked inactive) route here.
+  // See issue #3.
+  public async handleHostLoss(
+    roomCode: string,
+    departingPlayerId: string
+  ): Promise<HostLossOutcome> {
+    const room = await this.getRoom(roomCode);
+
+    if (room.hostId !== departingPlayerId) {
+      return { kind: 'not-host' };
+    }
+
+    if (room.status === 'LOBBY') {
+      const ranking = await this.endGame(roomCode);
+      return { kind: 'room-ended', ranking };
+    }
+
+    return await this.reassignHostInProgress(room, departingPlayerId);
+  }
+
+  // IN_PROGRESS half of host-loss: move the Host to an active Player so the game
+  // survives, or end the Room if none remain. See handleHostLoss / issue #3.
+  private async reassignHostInProgress(
+    room: Room,
+    departingPlayerId: string
+  ): Promise<HostLossOutcome> {
+    const players = await this.roomPlayersRepository.getRoomPlayersByCode(
+      room.code
+    );
+    const heir = players.find(
+      player => player.isActive && player.id !== departingPlayerId
+    );
+
+    if (!heir) {
+      const ranking = await this.endGame(room.code);
+      return { kind: 'room-ended', ranking };
+    }
+
+    await this.roomRepository.update(room.id, { hostId: heir.id });
+    await this.clearDepartedHostFlag(room.code, departingPlayerId);
+
+    const newHost = await this.updatePlayerInRoom(room.code, heir.id, {
+      isHost: true
+    });
+    return { kind: 'host-reassigned', newHost };
+  }
+
+  // A dropped ex-Host still has its row (marked inactive); clear its Host flag so a
+  // reconnect returns as an ordinary active Player, not Host. On explicit Leave the
+  // row is already gone, so there is nothing to clear. See ADR-0002, issue #3.
+  private async clearDepartedHostFlag(
+    roomCode: string,
+    playerId: string
+  ): Promise<void> {
+    const departing = await this.roomPlayersRepository.getPlayerFromRoom(
+      roomCode,
+      playerId
+    );
+    if (departing) {
+      await this.roomPlayersRepository.updatePlayerInRoom(roomCode, playerId, {
+        isHost: false
+      });
+    }
   }
 
   // Flips a Player's presence. A dropped connection sets `isActive` false (an

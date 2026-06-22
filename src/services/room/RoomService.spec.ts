@@ -314,6 +314,106 @@ describe('RoomService.setPlayerActive', () => {
   });
 });
 
+describe('RoomService.handleHostLoss', () => {
+  it('ends the Room when the Host is lost while in the LOBBY', async () => {
+    const { service } = buildService({
+      room: makeRoom({ status: 'LOBBY', hostId: 'host' }),
+      players: [
+        makePlayer({ id: 'host', isHost: true }),
+        makePlayer({ id: 'guest' })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    const outcome = await service.handleHostLoss(ROOM_CODE, 'host');
+
+    expect(outcome.kind).toBe('room-ended');
+    const room = await service.getRoom(ROOM_CODE);
+    expect(room.status).toBe('FINISHED');
+  });
+
+  it('reassigns the Host to an active Player while IN_PROGRESS', async () => {
+    const { service } = buildService({
+      room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
+      players: [
+        makePlayer({ id: 'host', isHost: true }),
+        makePlayer({ id: 'heir', isActive: true })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    const outcome = await service.handleHostLoss(ROOM_CODE, 'host');
+
+    expect(outcome).toEqual({
+      kind: 'host-reassigned',
+      newHost: expect.objectContaining({ id: 'heir', isHost: true })
+    });
+    const room = await service.getRoom(ROOM_CODE);
+    expect(room.hostId).toBe('heir');
+    expect(room.status).toBe('IN_PROGRESS');
+  });
+
+  it('ends the Room when the Host is lost IN_PROGRESS and no active Players remain', async () => {
+    const { service } = buildService({
+      room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
+      players: [
+        makePlayer({ id: 'host', isHost: true, isActive: false }),
+        makePlayer({ id: 'dropped', isActive: false })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    const outcome = await service.handleHostLoss(ROOM_CODE, 'host');
+
+    expect(outcome.kind).toBe('room-ended');
+    const room = await service.getRoom(ROOM_CODE);
+    expect(room.status).toBe('FINISHED');
+  });
+
+  it('leaves a dropped ex-Host as an ordinary active Player on reconnect', async () => {
+    const { service, fakes } = buildService({
+      room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
+      players: [
+        // Drop marks the ex-Host inactive but keeps the row (its Host flag still set).
+        makePlayer({ id: 'host', isHost: true, isActive: false }),
+        makePlayer({ id: 'heir', isActive: true })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    await service.handleHostLoss(ROOM_CODE, 'host');
+    const reconnected = await service.setPlayerActive(ROOM_CODE, 'host', true);
+
+    expect(reconnected.isActive).toBe(true);
+    expect(reconnected.isHost).toBe(false);
+    const room = await fakes.room.getRoomByCode(ROOM_CODE);
+    expect(room?.hostId).toBe('heir');
+  });
+
+  it('does nothing when the departing Player is not the Host', async () => {
+    const { service } = buildService({
+      room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
+      players: [
+        makePlayer({ id: 'host', isHost: true }),
+        makePlayer({ id: 'guest' })
+      ],
+      rounds: [],
+      playedCards: []
+    });
+
+    const outcome = await service.handleHostLoss(ROOM_CODE, 'guest');
+
+    expect(outcome.kind).toBe('not-host');
+    const room = await service.getRoom(ROOM_CODE);
+    expect(room.hostId).toBe('host');
+    expect(room.status).toBe('IN_PROGRESS');
+  });
+});
+
 describe('RoomService.allActivePlayersPlayed', () => {
   it('ignores Inactive Players when all active Players have played', async () => {
     const { service } = buildService({
