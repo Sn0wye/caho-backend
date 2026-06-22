@@ -5,6 +5,7 @@ import type { IRoomService } from './IRoomService';
 import { RoomService } from './RoomService';
 import { RoundRepositoryFactory } from '@/repositories/round';
 import { RoundPlayedCardsRepositoryFactory } from '@/repositories/round-played-cards';
+import { WhiteCardDealer } from './WhiteCardDealer';
 
 export function RoomServiceFactory(): IRoomService {
   return new RoomService(
@@ -12,6 +13,7 @@ export function RoomServiceFactory(): IRoomService {
     RankingRepositoryFactory(),
     RoomPlayersRepositoryFactory(),
     RoundRepositoryFactory(),
-    RoundPlayedCardsRepositoryFactory()
+    RoundPlayedCardsRepositoryFactory(),
+    new WhiteCardDealer()
   );
 }

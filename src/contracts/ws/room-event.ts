@@ -1,6 +1,7 @@
 import {
   blackCard,
   playerSchema,
+  rankingSchema,
   roomSchema,
   roundPlayedCardsSchema
 } from '@/schemas';
@@ -49,6 +50,12 @@ export const roomEvent = z.union([
   z.object({
     event: z.literal('room.black-card-drawn'),
     payload: blackCard
+  }),
+  // Final game-over broadcast carrying the Ranking — published by both the
+  // maxPoints win-condition and the host's manual /end. issue #1, slice 2.
+  z.object({
+    event: z.literal('room.game-end'),
+    payload: rankingSchema
   })
 ]);
 

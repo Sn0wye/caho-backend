@@ -19,7 +19,7 @@ export interface IRoomService {
   listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]>;
   addPlayerToRoom(input: { roomCode: string; player: Player }): Promise<void>;
   startRoom(roomCode: string): Promise<void>;
-  endRoom(roomCode: string): Promise<Ranking>;
+  endGame(roomCode: string): Promise<Ranking>;
   joinRoom(input: JoinRoomDTO): Promise<Room>;
   leaveRoom(input: LeaveRoomDTO): Promise<void>;
   getRoomPlayers(roomCode: string): Promise<Player[]>;
@@ -57,13 +57,9 @@ export interface IRoomService {
   ): Promise<RoundPlayedCard[]>;
   getRoundNumber(roomCode: string): Promise<number>;
   judgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<RoundPlayedCard>;
-  processJudgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<{
-    room: Room;
-    winner: RoundPlayedCard;
-  }>;
-  dealCardsToNonJudgePlayers(data: {
+  processJudgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<JudgePickResult>;
+  dealInitialHands(data: {
     roomCode: string;
-    judgeId: string;
     cardsPerPlayer: number;
   }): Promise<
     {
@@ -77,4 +73,15 @@ export type JudgeChooseWinnerDTO = {
   winnerPlayerId: string;
   judgePlayerId: string;
   roomCode: string;
+};
+
+// Outcome of the Judge's pick. `winnerPlayer` carries the updated score for the
+// `room.player-update` broadcast; when the win-condition is met `gameEnded` is
+// true and `ranking` holds the final Ranking for `room.game-end`. See issue #1.
+export type JudgePickResult = {
+  room: Room;
+  winner: RoundPlayedCard;
+  winnerPlayer: Player;
+  gameEnded: boolean;
+  ranking: Ranking | null;
 };

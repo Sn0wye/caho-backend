@@ -21,7 +21,11 @@ import type {
   WhiteCard
 } from '@/schemas';
 import { createId } from '@paralleldrive/cuid2';
-import type { IRoomService, JudgeChooseWinnerDTO } from './IRoomService';
+import type {
+  IRoomService,
+  JudgeChooseWinnerDTO,
+  JudgePickResult
+} from './IRoomService';
 import type { CreateRoomDTO } from '@/dto/CreateRoom';
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
@@ -30,6 +34,7 @@ import { CardService } from '../CardService';
 import type { IRoundRepository } from '@/repositories/round';
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import { getRandomJudge } from '@/utils/getRandomJudge';
+import type { IWhiteCardDealer } from './IWhiteCardDealer';
 
 export class RoomService implements IRoomService {
   constructor(
@@ -37,7 +42,8 @@ export class RoomService implements IRoomService {
     private readonly rankingRepository: IRankingRepository,
     private readonly roomPlayersRepository: IRoomPlayersRepository,
     private readonly roundsRepository: IRoundRepository,
-    private readonly roundPlayedCardsRepository: IRoundPlayedCardsRepository
+    private readonly roundPlayedCardsRepository: IRoundPlayedCardsRepository,
+    private readonly whiteCardDealer: IWhiteCardDealer
   ) {}
 
   public async getRoom(roomCode: string): Promise<Room> {
@@ -128,7 +134,10 @@ export class RoomService implements IRoomService {
     }
   }
 
-  public async endRoom(roomCode: string): Promise<Ranking> {
+  // Single end-of-game path: both the host's manual /end and the maxPoints
+  // win-condition route through here so the Room reaches FINISHED and the
+  // Ranking is built exactly one way. See issue #1, slice 2.
+  public async endGame(roomCode: string): Promise<Ranking> {
     try {
       await this.roomRepository.update(roomCode, {
         status: 'FINISHED'
@@ -349,11 +358,12 @@ export class RoomService implements IRoomService {
       whiteCardIds: playedCardIds
     });
 
-    const cardService = new CardService(roomCode, basePack);
-    const newWhiteCardsAmount = playedCardIds.length;
-
-    const newWhiteCards =
-      await cardService.getNewWhiteCards(newWhiteCardsAmount);
+    // Refill exactly the cards just played so the Hand tops back up to its
+    // standing size (10) and persists into the next Round. issue #1, slice 3.
+    const newWhiteCards = await this.whiteCardDealer.dealWhiteCards(
+      roomCode,
+      playedCardIds.length
+    );
 
     // remove cards from player hand and complete with new cards
     player.cardIds = player.cardIds.filter(
@@ -551,7 +561,7 @@ export class RoomService implements IRoomService {
     roomCode: string;
     judgePlayerId: string;
     winnerPlayerId: string;
-  }): Promise<{ room: Room; winner: RoundPlayedCard }> {
+  }): Promise<JudgePickResult> {
     const room = await this.getRoom(roomCode);
 
     if (!room) {
@@ -574,36 +584,48 @@ export class RoomService implements IRoomService {
       winnerPlayerId
     });
 
-    return { room, winner };
+    // The Judge's pick scores the winner — issue #1, slice 1. The played card's
+    // `player` is a bare User and cannot carry score, so we fetch the updated
+    // Player to broadcast the new score.
+    await this.incrementPlayerScore({
+      roomCode: room.code,
+      playerId: winnerPlayerId,
+      by: 1
+    });
+    const winnerPlayer = await this.getPlayerFromRoom(room.code, winnerPlayerId);
+
+    // Win-condition branch: reaching maxPoints ends the game instead of dealing
+    // another Round. issue #1, slice 2.
+    const gameEnded = winnerPlayer.score >= room.maxPoints;
+    const ranking = gameEnded ? await this.endGame(room.code) : null;
+
+    return { room, winner, winnerPlayer, gameEnded, ranking };
   }
 
-  public async dealCardsToNonJudgePlayers({
+  // Deal a fresh Hand to EVERY Player at room start, including the first Judge —
+  // a Hand now persists across Rounds and is refilled in playCards, so there is
+  // no per-Round full redeal. issue #1, slice 3.
+  public async dealInitialHands({
     roomCode,
-    judgeId,
     cardsPerPlayer
   }: {
     roomCode: string;
-    judgeId: string;
     cardsPerPlayer: number;
   }): Promise<Array<{ playerId: string; cards: WhiteCard[] }>> {
-    const cardService = new CardService(roomCode, basePack);
-    const roomPlayers = await this.getRoomPlayers(roomCode);
-    const playersWithoutJudge = roomPlayers.filter(
-      player => player.id !== judgeId
-    );
+    const players = await this.getRoomPlayers(roomCode);
     const result = [];
 
-    for (const player of playersWithoutJudge) {
-      const whiteCards = await cardService.getNewWhiteCards(cardsPerPlayer);
+    for (const player of players) {
+      const cards = await this.whiteCardDealer.dealWhiteCards(
+        roomCode,
+        cardsPerPlayer
+      );
 
       await this.updatePlayerInRoom(roomCode, player.id, {
-        cardIds: whiteCards.map(card => card.id)
+        cardIds: cards.map(card => card.id)
       });
 
-      result.push({
-        playerId: player.id,
-        cards: whiteCards
-      });
+      result.push({ playerId: player.id, cards });
     }
 
     return result;
