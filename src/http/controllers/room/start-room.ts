@@ -50,10 +50,6 @@ export const startRoomController = async (app: App) => {
         payload: room
       });
 
-      const playersWithoutJudge = players.filter(
-        player => player.id !== judgeId
-      );
-
       const blackCard = await cardService.getNewBlackCard();
       // card service already updates the black card in the db, this is just
       // to make sure the room object is up to date
@@ -65,15 +61,17 @@ export const startRoomController = async (app: App) => {
         payload: blackCard
       });
 
-      for (const player of playersWithoutJudge) {
-        const whiteCards = await cardService.getNewWhiteCards(10);
-        await app.pubsub.publish(player.id, {
-          event: 'player.cards-drawn',
-          payload: whiteCards
-        });
+      // Deal a starting Hand to EVERY Player, including the first Judge — Hands
+      // persist across Rounds and refill in playCards. issue #1, slice 3.
+      const initialHands = await roomService.dealInitialHands({
+        roomCode,
+        cardsPerPlayer: 10
+      });
 
-        await roomService.updatePlayerInRoom(roomCode, player.id, {
-          cardIds: whiteCards.map(card => card.id)
+      for (const hand of initialHands) {
+        await app.pubsub.publish(hand.playerId, {
+          event: 'player.cards-drawn',
+          payload: hand.cards
         });
       }
 

@@ -27,8 +27,16 @@ export const endRoomController = async (app: App) => {
         return res.badRequest(ROOM_ERRORS.IS_NOT_ROOM_HOST);
       }
 
-      const room = await roomService.endRoom(roomCode);
-      return room;
+      // Same end-of-game path as the maxPoints win-condition, and notify WS
+      // subscribers (previously this returned over HTTP only). issue #1, slice 2.
+      const ranking = await roomService.endGame(roomCode);
+
+      await app.pubsub.publish(roomCode, {
+        event: 'room.game-end',
+        payload: ranking
+      });
+
+      return ranking;
     }
   );
 };
