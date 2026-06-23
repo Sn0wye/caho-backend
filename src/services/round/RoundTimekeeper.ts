@@ -1,5 +1,6 @@
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import type { Round } from '@/schemas';
+import type { IRoundEventPublisher } from './IRoundEventPublisher';
 import type { IRoundRotator } from './IRoundRotator';
 import type { IRoundTimerRepository } from './IRoundTimerRepository';
 import type { IRoundTimerStore } from './IRoundTimerStore';
@@ -28,6 +29,7 @@ export class RoundTimekeeper {
     private readonly rounds: IRoundTimerRepository,
     private readonly playedCards: IRoundPlayedCardsRepository,
     private readonly rotator: IRoundRotator,
+    private readonly publisher: IRoundEventPublisher,
     private readonly config: RoundTimerConfig = DEFAULT_ROUND_TIMER_CONFIG
   ) {}
 
@@ -61,7 +63,16 @@ export class RoundTimekeeper {
       return;
     }
 
-    await this.rounds.claimAdvance(roundId, 'PLAYING', 'JUDGING');
+    // Gate the broadcast on the claim: only the event that actually won the
+    // PLAYING->JUDGING transition tells the Room it's time to judge, so a
+    // replayed expiry event can't re-broadcast.
+    const claimed = await this.rounds.claimAdvance(roundId, 'PLAYING', 'JUDGING');
+    if (claimed) {
+      await this.publisher.publish(round.roomCode, {
+        event: 'room.time-to-judge',
+        payload: { roundPlayedCards: plays }
+      });
+    }
   }
 
   // A Judge dropped (ADR-0002): hold the Round awaiting reconnect and arm the
@@ -138,6 +149,14 @@ export class RoundTimekeeper {
       return;
     }
 
-    await this.rotator.startNextRound(round.roomCode, round.roundNumber);
+    const next = await this.rotator.startNextRound(
+      round.roomCode,
+      round.roundNumber
+    );
+
+    await this.publisher.publish(round.roomCode, {
+      event: 'room.round-start',
+      payload: { roundNumber: next.roundNumber, blackCard: next.blackCard }
+    });
   }
 }

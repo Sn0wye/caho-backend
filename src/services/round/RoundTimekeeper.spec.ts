@@ -2,6 +2,7 @@ import type { Round, RoundPlayedCard } from '@/schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeRoundPlayedCardsRepository } from '../room/RoomService.fakes';
 import {
+  FakeRoundEventPublisher,
   FakeRoundRotator,
   FakeRoundTimerRepository,
   FakeRoundTimerStore
@@ -52,6 +53,7 @@ type Fakes = {
   rounds: FakeRoundTimerRepository;
   playedCards: FakeRoundPlayedCardsRepository;
   rotator: FakeRoundRotator;
+  publisher: FakeRoundEventPublisher;
 };
 
 function buildTimekeeper(args: {
@@ -62,7 +64,8 @@ function buildTimekeeper(args: {
     store: new FakeRoundTimerStore(),
     rounds: new FakeRoundTimerRepository(args.rounds),
     playedCards: new FakeRoundPlayedCardsRepository(args.playedCards ?? []),
-    rotator: new FakeRoundRotator()
+    rotator: new FakeRoundRotator(),
+    publisher: new FakeRoundEventPublisher()
   };
 
   const timekeeper = new RoundTimekeeper(
@@ -70,6 +73,7 @@ function buildTimekeeper(args: {
     fakes.rounds,
     fakes.playedCards,
     fakes.rotator,
+    fakes.publisher,
     { playWindowSeconds: 60, judgeGraceSeconds: 30 }
   );
 
@@ -249,6 +253,39 @@ describe('RoundTimekeeper.onExpired', () => {
 
     expect((await fakes.rounds.findById(ROUND_ID))?.status).toBe('PLAYING');
     expect(fakes.rotator.rotations).toHaveLength(0);
+  });
+});
+
+describe('RoundTimekeeper broadcasts a timer-driven advance', () => {
+  it('publishes room.time-to-judge once when the play window closes with plays', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'PLAYING' })],
+      playedCards: [makePlayedCard('player-a')]
+    });
+
+    await timekeeper.onPlayExpired(ROUND_ID);
+    await timekeeper.onPlayExpired(ROUND_ID);
+
+    const judging = fakes.publisher.published.filter(
+      p => p.event.event === 'room.time-to-judge'
+    );
+    expect(judging).toHaveLength(1);
+    expect(judging[0].channel).toBe(ROOM_CODE);
+  });
+
+  it('publishes room.round-start once when an aborted Round rotates', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'JUDGING' })]
+    });
+
+    await timekeeper.onJudgeExpired(ROUND_ID);
+    await timekeeper.onJudgeExpired(ROUND_ID);
+
+    const starts = fakes.publisher.published.filter(
+      p => p.event.event === 'room.round-start'
+    );
+    expect(starts).toHaveLength(1);
+    expect(starts[0].channel).toBe(ROOM_CODE);
   });
 });
 
