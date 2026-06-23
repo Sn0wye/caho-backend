@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   caho:
     driver: bridge
@@ -12,10 +10,12 @@ services:
     ports:
       - '6379:6379'
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD}']
+      REDIS_PASSWORD: caho
+    command: ['redis-server', '--requirepass', 'caho']
+    networks:
+      - caho
     healthcheck:
-      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
+      test: ['CMD', 'redis-cli', '-a', 'caho', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,14 +25,17 @@ services:
     container_name: caho-postgres
     restart: always
     environment:
-      POSTGRES_USER: ${DATABASE_USER}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_USER: caho
+      POSTGRES_PASSWORD: caho
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - caho
     healthcheck:
-      test: ['CMD', 'pg_isready', '-U', '${DATABASE_USER}']
+      test: ['CMD', 'pg_isready', '-U', 'caho']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -51,9 +54,9 @@ services:
       - caho
 
   caho-api:
-    image: ghcr.io/sn0wye/caho-api:prod
+    image: caho-api:latest
     restart: unless-stopped
-    env_file: ./caho.env
+    env_file: ./.env.docker
     environment:
       SEQ_URL: http://seq:5341
     healthcheck:
