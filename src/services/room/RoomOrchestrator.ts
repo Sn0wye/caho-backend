@@ -3,6 +3,7 @@ import { BadRequestError } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
 import type { IJudgeClock } from '@/services/round/IJudgeClock';
+import { toRoomPlayer } from '@/schemas';
 import type { Ranking, Room } from '@/schemas';
 import type { IRoomOrchestratorService } from './IRoomOrchestratorService';
 
@@ -26,7 +27,7 @@ export class RoomOrchestrator {
     const room = await this.rooms.joinRoom(input);
     await this.publisher.publish(input.roomCode, {
       event: 'room.player-joined',
-      payload: input.player
+      payload: toRoomPlayer(input.player)
     });
     return room;
   }
@@ -71,7 +72,7 @@ export class RoomOrchestrator {
     const player = await this.rooms.setPlayerActive(roomCode, playerId, isActive);
     await this.publisher.publish(roomCode, {
       event: 'room.player-update',
-      payload: player
+      payload: toRoomPlayer(player)
     });
 
     if (isActive) {
@@ -98,7 +99,7 @@ export class RoomOrchestrator {
     if (outcome.kind === 'host-reassigned') {
       await this.publisher.publish(roomCode, {
         event: 'room.player-update',
-        payload: outcome.newHost
+        payload: toRoomPlayer(outcome.newHost)
       });
       return;
     }

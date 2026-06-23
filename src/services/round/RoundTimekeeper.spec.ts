@@ -147,7 +147,10 @@ describe('RoundTimekeeper.advanceToJudging', () => {
     expect(fakes.publisher.published).toEqual([
       {
         channel: ROOM_CODE,
-        event: { event: 'room.time-to-judge', payload: { roundPlayedCards: plays } }
+        event: {
+          event: 'room.time-to-judge',
+          payload: { roundNumber: 1, roundPlayedCards: plays }
+        }
       }
     ]);
   });
@@ -322,6 +325,36 @@ describe('RoundTimekeeper broadcasts a timer-driven advance', () => {
     );
     expect(starts).toHaveLength(1);
     expect(starts[0].channel).toBe(ROOM_CODE);
+  });
+
+  it('announces the aborted Round with no winner before the next starts', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'JUDGING', roundNumber: 7 })]
+    });
+
+    await timekeeper.onJudgeExpired(ROUND_ID);
+
+    const events = fakes.publisher.published.map(p => p.event);
+    expect(events).toEqual([
+      {
+        event: 'room.round-end',
+        payload: {
+          roundNumber: 7,
+          winner: null,
+          winnerId: null,
+          newScore: null,
+          reason: 'aborted'
+        }
+      },
+      {
+        event: 'room.round-start',
+        payload: {
+          roundNumber: 8,
+          judgeId: 'fake-next-judge',
+          blackCard: { text: 'next black card', pick: 1, packId: 'fake-pack' }
+        }
+      }
+    ]);
   });
 });
 

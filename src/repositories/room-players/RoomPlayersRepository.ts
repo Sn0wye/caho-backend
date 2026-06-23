@@ -48,7 +48,6 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
       playerId: player.id,
       isHost: player.isHost,
       isReady: player.isReady,
-      isJudge: player.isJudge,
       cardIds: []
     });
   }
@@ -63,7 +62,8 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
         eq(roomPlayers.playerId, playerId)
       ),
       with: {
-        player: true
+        player: true,
+        room: true
       }
     });
 
@@ -77,7 +77,9 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
       username: player.player.username,
       score: player.score,
       isHost: player.isHost,
-      isJudge: player.isJudge,
+      // Judge identity lives on the Room (room.judgeId); derive it so every read
+      // path agrees and it can't go stale across rotations. ADR-0005.
+      isJudge: player.room.judgeId === player.player.id,
       isReady: player.isReady,
       isActive: player.isActive,
       cardIds: player.cardIds
@@ -161,7 +163,6 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
             score: player.score,
             isReady: player.isReady,
             isHost: player.isHost,
-            isJudge: player.isJudge,
             isActive: player.isActive,
             cardIds: player.cardIds
           })

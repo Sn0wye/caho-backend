@@ -84,7 +84,7 @@ export class RoundTimekeeper {
 
     await this.publisher.publish(round.roomCode, {
       event: 'room.time-to-judge',
-      payload: { roundPlayedCards: plays }
+      payload: { roundNumber: round.roundNumber, roundPlayedCards: plays }
     });
     return true;
   }
@@ -163,6 +163,20 @@ export class RoundTimekeeper {
       return;
     }
 
+    // Tell the Room the Round died with no winner before announcing the next one,
+    // so the frontend can render "aborted, nobody scored" rather than inferring it
+    // from a silent jump to the next Round. ADR-0005.
+    await this.publisher.publish(round.roomCode, {
+      event: 'room.round-end',
+      payload: {
+        roundNumber: round.roundNumber,
+        winner: null,
+        winnerId: null,
+        newScore: null,
+        reason: 'aborted'
+      }
+    });
+
     const next = await this.rotator.startNextRound(
       round.roomCode,
       round.roundNumber
@@ -170,7 +184,11 @@ export class RoundTimekeeper {
 
     await this.publisher.publish(round.roomCode, {
       event: 'room.round-start',
-      payload: { roundNumber: next.roundNumber, blackCard: next.blackCard }
+      payload: {
+        roundNumber: next.roundNumber,
+        judgeId: next.judgeId,
+        blackCard: next.blackCard
+      }
     });
   }
 }
