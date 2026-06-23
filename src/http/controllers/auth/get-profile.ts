@@ -1,9 +1,10 @@
 import { getProfileResponse } from '@/contracts';
+import { ensureAuth } from '@/plugins/ensure-auth';
 import { errorSchema } from '@/schemas';
 import type { FastifyInstance } from 'fastify';
 
 export const getProfileController = async (app: FastifyInstance) => {
-  app.get(
+  app.register(ensureAuth).get(
     '/profile',
     {
       schema: {
