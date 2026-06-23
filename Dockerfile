@@ -19,11 +19,11 @@ FROM node:24.15.0-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk add --no-cache curl
-EXPOSE 8081
+EXPOSE 8080
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
 USER node
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl -fsS http://localhost:8081/ping || exit 1
+  CMD curl -fsS http://localhost:8080/ping || exit 1
 CMD ["node", "dist/server.js"]
