@@ -1,4 +1,5 @@
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
+import { toRoomPlayer } from '@/schemas';
 import { BadRequestError } from '@/errors';
 import type { IRoundClock } from './IRoundClock';
 import type { IRoundFlowService } from './IRoundFlowService';
@@ -47,7 +48,7 @@ export class RoundFlow {
     player.isReady = true;
     await this.publisher.publish(roomCode, {
       event: 'room.player-update',
-      payload: player
+      payload: toRoomPlayer(player)
     });
     await this.publisher.publish(player.id, {
       event: 'player.cards-drawn',
@@ -87,16 +88,18 @@ export class RoundFlow {
         winnerPlayerId
       });
 
+    // One self-contained round end: the winning Played Card plus the winner's new
+    // score (the card carries only a bare User and can't hold the score). The
+    // frontend applies the whole outcome from this single message. ADR-0005.
     await this.publisher.publish(room.code, {
       event: 'room.round-end',
-      payload: winner
-    });
-
-    // The played card carries only a bare User, so the winner's score travels via
-    // room.player-update. issue #1, slice 1.
-    await this.publisher.publish(room.code, {
-      event: 'room.player-update',
-      payload: winnerPlayer
+      payload: {
+        roundNumber: room.round,
+        winner,
+        winnerId: winnerPlayer.id,
+        newScore: winnerPlayer.score,
+        reason: 'picked'
+      }
     });
 
     if (gameEnded) {
@@ -118,6 +121,7 @@ export class RoundFlow {
       event: 'room.round-start',
       payload: {
         roundNumber: nextRound.roundNumber,
+        judgeId: nextRound.judgeId,
         blackCard: nextRound.blackCard
       }
     });
@@ -133,7 +137,7 @@ export class RoundFlow {
 
     await this.publisher.publish(roomCode, {
       event: 'room.player-update',
-      payload: player
+      payload: toRoomPlayer(player)
     });
   }
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "room_players" DROP COLUMN IF EXISTS "is_judge";

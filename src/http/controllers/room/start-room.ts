@@ -5,6 +5,7 @@ import { CardServiceFactory } from '@/services/CardServiceFactory';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 import { getRandomJudge } from '@/utils/getRandomJudge';
+import { toRoomPlayer } from '@/schemas';
 import { startRoom } from '@/contracts';
 
 // TODO: refactor this controller, it's doing business logic
@@ -36,19 +37,29 @@ export const startRoomController = async (app: App) => {
       const players = await roomService.getRoomPlayers(roomCode);
       const judgeId = getRandomJudge(room.prevJudgeId, players);
 
+      // Judge identity lives on room.judgeId; no per-Player is_judge to write —
+      // every read derives isJudge from it (ADR-0005).
       room = await roomService.updateRoom(roomCode, {
         judgeId,
         status: 'IN_PROGRESS',
         round: room.round + 1
       });
 
-      await roomService.updatePlayerInRoom(roomCode, judgeId, {
-        isJudge: true
-      });
+      // Every Player is unready at the start of a Round — reflect it in the
+      // snapshot below before we broadcast it.
+      await roomService.setPlayersAsUnready(roomCode);
 
+      // Seed the whole IN_PROGRESS state in one self-contained message: the
+      // sanitized Room (never broadcast the password) plus every Player's public
+      // state as a RoomPlayer (no private Hand, no derived isJudge). Replaces the
+      // old per-Player update loop and the dead room.black-card-drawn. ADR-0005.
+      const { password: _password, ...sanitizedRoom } = room;
       await app.pubsub.publish(roomCode, {
         event: 'room.started',
-        payload: room
+        payload: {
+          room: sanitizedRoom,
+          players: players.map(player => toRoomPlayer({ ...player, isReady: false }))
+        }
       });
 
       const blackCard = await cardService.getNewBlackCard();
@@ -56,14 +67,9 @@ export const startRoomController = async (app: App) => {
       // to make sure the room object is up to date
       room.currentBlackCardId = blackCard.id;
 
-      // TODO: remove this event as it was replaced by the room.round-start event
-      await app.pubsub.publish(roomCode, {
-        event: 'room.black-card-drawn',
-        payload: blackCard
-      });
-
       // Deal a starting Hand to EVERY Player, including the first Judge — Hands
-      // persist across Rounds and refill in playCards. issue #1, slice 3.
+      // persist across Rounds and refill in playCards. issue #1, slice 3. Each
+      // Hand goes only to its owner's private Player channel.
       const initialHands = await roomService.dealInitialHands({
         roomCode,
         cardsPerPlayer: 10
@@ -73,17 +79,6 @@ export const startRoomController = async (app: App) => {
         await app.pubsub.publish(hand.playerId, {
           event: 'player.cards-drawn',
           payload: hand.cards
-        });
-      }
-
-      // set players as not ready, because they haven't played the card for this round
-      await roomService.setPlayersAsUnready(roomCode);
-      for (const player of players) {
-        player.isReady = false;
-
-        await app.pubsub.publish(roomCode, {
-          event: 'room.player-update',
-          payload: player
         });
       }
 
@@ -103,6 +98,7 @@ export const startRoomController = async (app: App) => {
         event: 'room.round-start',
         payload: {
           roundNumber: round.roundNumber,
+          judgeId,
           blackCard
         }
       });

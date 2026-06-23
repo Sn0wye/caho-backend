@@ -5,6 +5,10 @@ import type { BlackCard } from '@/schemas';
 // this. See issue #4.
 export type RoundRotation = {
   roundNumber: number;
+  // The Judge for the new Round — carried into room.round-start so the frontend
+  // can move the Judge without a refetch. RoomService.startNextRound sets this on
+  // the new Round row. ADR-0005.
+  judgeId: string;
   blackCard: BlackCard;
 };
 

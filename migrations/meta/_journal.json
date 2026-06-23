@@ -43,6 +43,13 @@
       "when": 1782173334877,
       "tag": "0005_curious_puff_adder",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1782220595808,
+      "tag": "0006_simple_pestilence",
+      "breakpoints": true
     }
   ]
 }

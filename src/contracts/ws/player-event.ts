@@ -1,17 +1,12 @@
 import { whiteCard } from '@/schemas';
 import { z } from 'zod';
 
-// This is only duplicated because union needs at least 2 elements.
-// Remove the second one as more player events are added
-const playerEvent = z.union([
-  z.object({
-    event: z.literal('player.cards-drawn'),
-    payload: z.array(whiteCard)
-  }),
-  z.object({
-    event: z.literal('player.cards-drawn'),
-    payload: z.array(whiteCard)
-  })
-]);
+// The private, per-Player channel (channel name = Player id = userId). Carries
+// only the freshly dealt/refilled Hand today. Widen to a z.union when a second
+// player event is added. See docs/ws-events.md / ADR-0005.
+const playerEvent = z.object({
+  event: z.literal('player.cards-drawn'),
+  payload: z.array(whiteCard)
+});
 
 export type PlayerEvent = z.infer<typeof playerEvent>;

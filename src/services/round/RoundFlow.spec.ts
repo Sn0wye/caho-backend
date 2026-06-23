@@ -3,6 +3,7 @@ import type {
   Player,
   Ranking,
   Room,
+  RoomPlayer,
   Round,
   RoundPlayedCard,
   RoundWithRelations,
@@ -72,6 +73,21 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     judgeDeadline: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides
+  };
+}
+
+// Room-channel view of makePlayer: what a room.player-update actually carries
+// after the private Hand (cardIds) and derived isJudge are stripped. ADR-0005.
+function makeRoomPlayer(overrides: Partial<RoomPlayer> = {}): RoomPlayer {
+  return {
+    id: PLAYER_ID,
+    username: 'player-a',
+    avatarUrl: null,
+    isHost: false,
+    isReady: false,
+    isActive: true,
+    score: 0,
     ...overrides
   };
 }
@@ -153,7 +169,10 @@ describe('RoundFlow.playCards', () => {
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
-        event: { event: 'room.player-update', payload: makePlayer({ isReady: true }) }
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer({ isReady: true })
+        }
       },
       {
         channel: PLAYER_ID,
@@ -197,7 +216,7 @@ describe('RoundFlow.playCards', () => {
 });
 
 describe('RoundFlow.judgePick', () => {
-  it('broadcasts the round end and winner score, then starts and arms the next Round', async () => {
+  it('broadcasts one self-contained round end with the winner score, then starts and arms the next Round', async () => {
     const winner = makePlayedCard(PLAYER_ID);
     const winnerPlayer = makePlayer({ score: 1 });
     const nextRound = makeNextRound();
@@ -213,16 +232,24 @@ describe('RoundFlow.judgePick', () => {
     ]);
     expect(clock.armed).toEqual([nextRound.id]);
     expect(publisher.published).toEqual([
-      { channel: ROOM_CODE, event: { event: 'room.round-end', payload: winner } },
       {
         channel: ROOM_CODE,
-        event: { event: 'room.player-update', payload: winnerPlayer }
+        event: {
+          event: 'room.round-end',
+          payload: {
+            roundNumber: 2,
+            winner,
+            winnerId: PLAYER_ID,
+            newScore: 1,
+            reason: 'picked'
+          }
+        }
       },
       {
         channel: ROOM_CODE,
         event: {
           event: 'room.round-start',
-          payload: { roundNumber: 3, blackCard: BLACK_CARD }
+          payload: { roundNumber: 3, judgeId: 'player-judge', blackCard: BLACK_CARD }
         }
       }
     ]);
@@ -258,7 +285,10 @@ describe('RoundFlow.playerReady', () => {
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
-        event: { event: 'room.player-update', payload: makePlayer({ isReady: true }) }
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer({ isReady: true })
+        }
       }
     ]);
   });

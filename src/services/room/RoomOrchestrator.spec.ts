@@ -1,6 +1,6 @@
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import { BadRequestError } from '@/errors';
-import type { Player, Ranking, Room, Round } from '@/schemas';
+import type { Player, Ranking, Room, RoomPlayer, Round } from '@/schemas';
 import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
 import type { HostLossOutcome } from './IRoomService';
 import {
@@ -26,6 +26,21 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
     isActive: true,
     score: 0,
     cardIds: [],
+    ...overrides
+  };
+}
+
+// What a room.* player payload carries after the private Hand (cardIds) and the
+// derived isJudge are stripped from a Player. ADR-0005.
+function makeRoomPlayer(overrides: Partial<RoomPlayer> = {}): RoomPlayer {
+  return {
+    id: 'player-a',
+    username: 'player-a',
+    avatarUrl: null,
+    isHost: false,
+    isReady: false,
+    isActive: true,
+    score: 0,
     ...overrides
   };
 }
@@ -106,7 +121,7 @@ describe('RoomOrchestrator.joinRoom', () => {
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
-        event: { event: 'room.player-joined', payload: input.player }
+        event: { event: 'room.player-joined', payload: makeRoomPlayer() }
       }
     ]);
   });
@@ -139,7 +154,13 @@ describe('RoomOrchestrator.leaveRoom', () => {
 
     expect(publisher.published).toEqual([
       { channel: ROOM_CODE, event: { event: 'room.player-left', payload: { id: HOST_ID } } },
-      { channel: ROOM_CODE, event: { event: 'room.player-update', payload: newHost } }
+      {
+        channel: ROOM_CODE,
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer({ id: 'heir', isHost: true })
+        }
+      }
     ]);
   });
 
@@ -175,7 +196,7 @@ describe('RoomOrchestrator.markPresence', () => {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: makePlayer({ id: JUDGE_ID, isActive: true })
+          payload: makeRoomPlayer({ id: JUDGE_ID, isActive: true })
         }
       }
     ]);

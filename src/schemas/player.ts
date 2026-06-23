@@ -15,3 +15,20 @@ export const playerSchema = z.object({
 });
 
 export type Player = z.infer<typeof playerSchema>;
+
+// Room-channel view of a Player: the public, broadcastable subset. Omits the
+// private Hand (`cardIds` would leak every Player's cards to the whole Room) and
+// the derived `isJudge` flag — the frontend computes `isJudge = id === judgeId`
+// from `room.round-start`, so `isJudge` carries no authoritative truth here.
+// Every room.* player payload uses this view; the Hand travels only on the
+// private Player channel via `player.cards-drawn`. See ADR-0005.
+export const roomPlayerSchema = playerSchema.omit({
+  cardIds: true,
+  isJudge: true
+});
+
+export type RoomPlayer = z.infer<typeof roomPlayerSchema>;
+
+// Strip the private/derived fields off a Player for a room-channel broadcast.
+export const toRoomPlayer = ({ cardIds, isJudge, ...rest }: Player): RoomPlayer =>
+  rest;
