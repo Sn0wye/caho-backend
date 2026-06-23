@@ -36,6 +36,13 @@
       "when": 1782170793405,
       "tag": "0004_cute_thunderbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1782173334877,
+      "tag": "0005_curious_puff_adder",
+      "breakpoints": true
     }
   ]
 }

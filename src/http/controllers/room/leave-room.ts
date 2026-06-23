@@ -3,9 +3,12 @@ import { ensureAuth } from '@/plugins/ensure-auth';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { leaveRoom } from '@/contracts';
 import { broadcastHostLoss } from '@/http/broadcastHostLoss';
+import { handleJudgeLoss } from '@/http/handleJudgeLoss';
+import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 
 export const leaveRoomController = async (app: App) => {
   const roomService = RoomServiceFactory();
+  const timekeeper = RoundTimekeeperFactory();
 
   app.register(ensureAuth).post(
     '/leave',
@@ -36,6 +39,11 @@ export const leaveRoomController = async (app: App) => {
         }
       });
       await broadcastHostLoss(app, roomCode, hostLoss);
+
+      // An explicit Judge Leave aborts the Round and rotates immediately — no
+      // grace, unlike a drop. The Room's judgeId outlives the deleted Player row,
+      // so this still resolves correctly here. See ADR-0002/0003, issue #4.
+      await handleJudgeLoss(roomService, timekeeper, roomCode, user.id, 'leave');
 
       return res.status(204);
     }

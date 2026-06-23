@@ -30,6 +30,8 @@ import { wsRoutes } from './http/routes/ws';
 import { Pubsub } from './lib/pub-sub';
 import { authPlugin } from './plugins/auth';
 import { checkRoutes } from './http/routes/checks';
+import { RoundTimekeeperFactory } from './services/round/RoundTimekeeperFactory';
+import { subscribeRoundExpiry } from './services/round/subscribeRoundExpiry';
 
 // import { csrfPlugin } from './plugins/csrf';
 
@@ -45,7 +47,21 @@ export const app = fastify({
   logger
 }).withTypeProvider<ZodTypeProvider>();
 
+// Round timer engine (ADR-0003 / issue #4): on boot, sweep any Round whose
+// deadline lapsed while the process was down, then subscribe to Redis expired-key
+// events to advance Rounds live. The sweep runs before the subscriber so a missed
+// event and a fresh event can't race. Skipped under test (no live Redis).
+let unsubscribeRoundExpiry: (() => Promise<void>) | null = null;
+if (env.NODE_ENV !== 'test') {
+  app.addHook('onReady', async () => {
+    const timekeeper = RoundTimekeeperFactory();
+    await timekeeper.reconcile();
+    unsubscribeRoundExpiry = await subscribeRoundExpiry(redis, timekeeper);
+  });
+}
+
 app.addHook('onClose', async () => {
+  await unsubscribeRoundExpiry?.();
   await seqStream?.flush();
 });
 

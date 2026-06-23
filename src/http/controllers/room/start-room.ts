@@ -4,6 +4,7 @@ import { ROOM_ERRORS } from '@/errors/room';
 import { ensureAuth } from '@/plugins/ensure-auth';
 import { CardService } from '@/services/CardService';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 import { getRandomJudge } from '@/utils/getRandomJudge';
 import { startRoom } from '@/contracts';
 
@@ -11,6 +12,7 @@ import { startRoom } from '@/contracts';
 // it should be in the service layer
 export const startRoomController = async (app: App) => {
   const roomService = RoomServiceFactory();
+  const timekeeper = RoundTimekeeperFactory();
 
   app.register(ensureAuth).post(
     '/start',
@@ -93,6 +95,10 @@ export const startRoomController = async (app: App) => {
         roundNumber: room.round,
         roundWinnerId: null
       });
+
+      // Start the first Round's play clock (ADR-0003): expiry advances the Round
+      // so an AFK Player can't stall the game. issue #4.
+      await timekeeper.armPlayDeadline(round.id);
 
       await app.pubsub.publish(roomCode, {
         event: 'room.round-start',
