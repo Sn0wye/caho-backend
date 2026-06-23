@@ -46,6 +46,8 @@ services:
     restart: unless-stopped
     environment:
       ACCEPT_EULA: Y
+      # latest seq refuses first run without auth config; local stack opts out
+      SEQ_FIRSTRUN_NOAUTHENTICATION: 'true'
     ports:
       - '5341:80'
     volumes:
@@ -54,17 +56,15 @@ services:
       - caho
 
   caho-api:
-    image: caho-api:latest
+    container_name: caho-api
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./.env.docker
     environment:
-      SEQ_URL: http://seq:5341
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8081/readyz']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      SEQ_URL: http://caho-seq:5341
+      SEQ_FIRSTRUN_ADMINPASSWORD: caho
     ports:
       - '8081:8081'
     networks:
