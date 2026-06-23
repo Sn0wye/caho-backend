@@ -548,7 +548,10 @@ export class RoomService implements IRoomService {
     return room.round;
   }
 
-  public async judgeChooseWinner(
+  // Internal helper of processJudgeChooseWinner — records the Judge's pick and
+  // returns the winning Played Card. Not on IRoomService: orchestration calls the
+  // richer processJudgeChooseWinner, never this directly. See ADR-0004.
+  private async judgeChooseWinner(
     data: JudgeChooseWinnerDTO
   ): Promise<RoundPlayedCard> {
     const room = await this.getRoom(data.roomCode);

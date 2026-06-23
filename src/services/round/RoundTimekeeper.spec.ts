@@ -132,6 +132,42 @@ describe('RoundTimekeeper.onPlayExpired', () => {
   });
 });
 
+describe('RoundTimekeeper.advanceToJudging', () => {
+  it('claims PLAYING->JUDGING and broadcasts time-to-judge once with the plays', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'PLAYING' })]
+    });
+    const plays = [makePlayedCard('player-a')];
+
+    const advanced = await timekeeper.advanceToJudging(makeRound(), plays);
+
+    expect(advanced).toBe(true);
+    const round = await fakes.rounds.findById(ROUND_ID);
+    expect(round?.status).toBe('JUDGING');
+    expect(fakes.publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: { event: 'room.time-to-judge', payload: { roundPlayedCards: plays } }
+      }
+    ]);
+  });
+
+  it('is idempotent: a second caller wins no claim and does not re-broadcast', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'PLAYING' })]
+    });
+    const round = makeRound();
+    const plays = [makePlayedCard('player-a')];
+
+    const first = await timekeeper.advanceToJudging(round, plays);
+    const second = await timekeeper.advanceToJudging(round, plays);
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(fakes.publisher.published).toHaveLength(1);
+  });
+});
+
 describe('RoundTimekeeper.armJudgeGrace', () => {
   it('holds the Round and arms the judge-grace key without changing phase', async () => {
     const { timekeeper, fakes } = buildTimekeeper({

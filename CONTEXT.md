@@ -53,8 +53,13 @@ _Avoid_: id, room id, pin
 
 **Round**:
 One cycle within an in-progress Room: a Black Card is shown, non-Judge Players
-play, the Judge picks a winner, the winner scores. Numbered from 1.
+play, the Judge picks a winner, the winner scores. Numbered from 1. A Round moves
+through _phases_: **playing** (Players submit answers), **judging** (the Judge
+picks among the Played Cards), and may **abort** when a Judge drops or a deadline
+lapses with the Round unfinished. An aborted Round scores no one and rotates the
+Judge into the next Round.
 _Avoid_: turn, hand
+_Phase, avoid_: stage, step, state
 
 **maxPoints**:
 The score a Player must reach to win the Room and drive it to `FINISHED`.

@@ -57,6 +57,7 @@
     "@types/node": "^20.12.8",
     "@types/pg": "^8.11.5",
     "@types/ws": "^8.5.10",
+    "biome": "^0.3.3",
     "dotenv-cli": "^7.3.0",
     "drizzle-kit": "^0.21.2",
     "tsup": "^8.0.2",

@@ -1,11 +1,11 @@
 import type { App } from '@/app';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
 import { joinRoomRequest } from '@/contracts';
 import type { Player } from '@/schemas';
 
 export const joinRoomController = async (app: App) => {
-  const roomService = RoomServiceFactory();
+  const roomOrchestrator = RoomOrchestratorFactory();
 
   app.register(ensureAuth).post(
     '/join',
@@ -33,18 +33,7 @@ export const joinRoomController = async (app: App) => {
         cardIds: []
       };
 
-      const room = await roomService.joinRoom({
-        roomCode,
-        password,
-        player
-      });
-
-      app.pubsub.publish(roomCode, {
-        event: 'room.player-joined',
-        payload: player
-      });
-
-      return room;
+      return roomOrchestrator.joinRoom({ roomCode, password, player });
     }
   );
 };

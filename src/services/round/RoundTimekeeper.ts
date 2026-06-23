@@ -1,5 +1,5 @@
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
-import type { Round } from '@/schemas';
+import type { Round, RoundPlayedCard } from '@/schemas';
 import type { IRoundEventPublisher } from './IRoundEventPublisher';
 import type { IRoundRotator } from './IRoundRotator';
 import type { IRoundTimerRepository } from './IRoundTimerRepository';
@@ -63,16 +63,30 @@ export class RoundTimekeeper {
       return;
     }
 
-    // Gate the broadcast on the claim: only the event that actually won the
-    // PLAYING->JUDGING transition tells the Room it's time to judge, so a
-    // replayed expiry event can't re-broadcast.
-    const claimed = await this.rounds.claimAdvance(roundId, 'PLAYING', 'JUDGING');
-    if (claimed) {
-      await this.publisher.publish(round.roomCode, {
-        event: 'room.time-to-judge',
-        payload: { roundPlayedCards: plays }
-      });
+    await this.advanceToJudging(round, plays);
+  }
+
+  // Move a Round from playing to judging and tell the Room. Shared by the two
+  // paths that end the play phase — the deadline expiry (onPlayExpired) and all
+  // active Players having played (RoundFlow) — so the transition has exactly one
+  // guarded emitter. The broadcast is gated on the claim: only the caller that
+  // actually won PLAYING->JUDGING prompts the Judge, so a replayed expiry event or
+  // a play landing at the same time as the deadline can't double-prompt. Returns
+  // true when this call advanced the Round. See ADR-0004.
+  public async advanceToJudging(
+    round: Round,
+    plays: RoundPlayedCard[]
+  ): Promise<boolean> {
+    const claimed = await this.rounds.claimAdvance(round.id, 'PLAYING', 'JUDGING');
+    if (!claimed) {
+      return false;
     }
+
+    await this.publisher.publish(round.roomCode, {
+      event: 'room.time-to-judge',
+      payload: { roundPlayedCards: plays }
+    });
+    return true;
   }
 
   // A Judge dropped (ADR-0002): hold the Round awaiting reconnect and arm the
