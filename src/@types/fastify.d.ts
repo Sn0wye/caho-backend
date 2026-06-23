@@ -1,7 +1,7 @@
 import 'fastify';
+import type { Session, SessionUser } from '@/auth/session-types';
 import type { Pubsub } from '@/lib/pub-sub';
 import type { Redis } from 'ioredis';
-import type { Session, User } from 'lucia';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -11,7 +11,7 @@ declare module 'fastify' {
   }
 
   interface FastifyRequest {
-    getUser(): User;
+    getUser(): SessionUser;
     getSession(): Session;
   }
 }
