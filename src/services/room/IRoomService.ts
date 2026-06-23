@@ -68,7 +68,6 @@ export interface IRoomService {
   ): Promise<RoundPlayedCard[]>;
   getActiveRound(roomCode: string): Promise<Round | null>;
   getRoundNumber(roomCode: string): Promise<number>;
-  judgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<RoundPlayedCard>;
   processJudgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<JudgePickResult>;
   dealInitialHands(data: {
     roomCode: string;

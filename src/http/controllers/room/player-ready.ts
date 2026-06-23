@@ -1,10 +1,10 @@
 import type { App } from '@/app';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { RoundFlowFactory } from '@/services/round/RoundFlowFactory';
 import { z } from 'zod';
 
 export const playerReadyController = async (app: App) => {
-  const roomService = RoomServiceFactory();
+  const roundFlow = RoundFlowFactory();
 
   app.register(ensureAuth).post(
     '/:roomCode/ready',
@@ -22,17 +22,7 @@ export const playerReadyController = async (app: App) => {
       const userId = req.getUser().id;
       const { roomCode } = req.params;
 
-      const player = await roomService.getPlayerFromRoom(roomCode, userId);
-
-      await roomService.updatePlayerInRoom(roomCode, userId, {
-        isReady: !player.isReady
-      });
-      player.isReady = !player.isReady;
-
-      await app.pubsub.publish(roomCode, {
-        event: 'room.player-update',
-        payload: player
-      });
+      await roundFlow.playerReady(roomCode, userId);
     }
   );
 };
