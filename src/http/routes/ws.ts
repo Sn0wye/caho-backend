@@ -1,11 +1,14 @@
 import type { App } from '@/app';
 import { logger } from '@/lib/logger';
 import { broadcastHostLoss } from '@/http/broadcastHostLoss';
+import { handleJudgeLoss } from '@/http/handleJudgeLoss';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 import { z } from 'zod';
 
 export const wsRoutes = async (app: App) => {
   const roomService = RoomServiceFactory();
+  const timekeeper = RoundTimekeeperFactory();
 
   // The per-user socket's close is attributable to a userId (unlike the Room
   // socket, keyed by Code), so it drives presence: a drop marks the Player
@@ -33,6 +36,10 @@ export const wsRoutes = async (app: App) => {
         if (!isActive) {
           const hostLoss = await roomService.handleHostLoss(roomCode, userId);
           await broadcastHostLoss(app, roomCode, hostLoss);
+
+          // A dropped Judge holds the Round: arm the judge-grace timer so it
+          // aborts+rotates only if the Judge never reconnects. See ADR-0002/0003.
+          await handleJudgeLoss(roomService, timekeeper, roomCode, userId, 'drop');
         }
       } catch (error) {
         // A concurrent Leave can delete the row mid-flight; skip that Room

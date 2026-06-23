@@ -1,10 +1,12 @@
 import type { App } from '@/app';
 import { ensureAuth } from '@/plugins/ensure-auth';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 import { z } from 'zod';
 
 export const judgeChooseWinner = async (app: App) => {
   const roomService = RoomServiceFactory();
+  const timekeeper = RoundTimekeeperFactory();
 
   app.register(ensureAuth).post(
     '/:roomCode/winner',
@@ -57,6 +59,10 @@ export const judgeChooseWinner = async (app: App) => {
       }
 
       const nextRound = await roomService.startNextRound(room.code, room.round);
+
+      // Start the next Round's play clock (ADR-0003): a Redis TTL key whose expiry
+      // advances the Round so an AFK Player can't stall it. issue #4.
+      await timekeeper.armPlayDeadline(nextRound.id);
 
       // No per-Round redeal: Hands persist and are refilled in playCards.
       // issue #1, slice 3.

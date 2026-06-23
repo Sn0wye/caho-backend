@@ -2,6 +2,7 @@
 
 - Always use caveman skill. All responses must apply `/caveman full` mode for token efficiency. Drop filler, fragments OK, short synonyms only. See caveman skill for intensity levels (lite/full/ultra).
 - For terminal work, always use `rtk` prefix on commands. RTK filters output automatically. Never run commands without `rtk` wrapper.
+- Use replace `npm` with `pnpm` for package managing, and use `pnpm dlx` as a replacement for `npx`.
 
 ## Code style
 

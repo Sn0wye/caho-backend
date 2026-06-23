@@ -189,6 +189,18 @@ export const rounds = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
     roundWinnerId: varchar('round_winner_id', { length: 24 }),
+    // Phase machine + deadlines back the Redis-key-expiry round timers. `status`
+    // is the idempotent-claim guard (conditional UPDATE ... WHERE status = $from),
+    // and the deadlines let a startup sweep advance Rounds whose timer fired while
+    // no subscriber was up. See ADR-0003 / issue #4.
+    status: varchar('status', {
+      enum: ['PLAYING', 'JUDGING', 'COMPLETE', 'ABORTED'],
+      length: 255
+    })
+      .notNull()
+      .default('PLAYING'),
+    playDeadline: timestamp('play_deadline'),
+    judgeDeadline: timestamp('judge_deadline'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow()
   },

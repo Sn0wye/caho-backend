@@ -498,6 +498,9 @@ export class RoomService implements IRoomService {
         blackCardId: data.blackCardId,
         roundNumber: data.roundNumber,
         roundWinnerId: data.roundWinnerId,
+        status: 'PLAYING',
+        playDeadline: null,
+        judgeDeadline: null,
         createdAt: new Date(),
         updatedAt: new Date()
       });
@@ -519,6 +522,19 @@ export class RoomService implements IRoomService {
       );
 
     return roundPlayedCards;
+  }
+
+  // The Round currently in play for a Room (its round number lives on the Room).
+  // Drives presence-driven Judge-loss: a drop arms the judge-grace timer on this
+  // Round, an explicit Judge leave aborts it. See ADR-0002/0003, issue #4.
+  public async getActiveRound(roomCode: string): Promise<Round | null> {
+    const room = await this.roomRepository.getRoomByCode(roomCode);
+
+    if (!room) {
+      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
+    }
+
+    return await this.roundsRepository.find(roomCode, room.round);
   }
 
   public async getRoundNumber(roomCode: string): Promise<number> {
@@ -626,6 +642,9 @@ export class RoomService implements IRoomService {
       blackCardId: newBlackCard.id,
       roundNumber: round.roundNumber + 1,
       roundWinnerId: null,
+      status: 'PLAYING',
+      playDeadline: null,
+      judgeDeadline: null,
       createdAt: new Date(),
       updatedAt: new Date()
     });

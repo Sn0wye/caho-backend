@@ -57,6 +57,9 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     blackCardId: 'black-1',
     judgeId: 'player-judge',
     roundWinnerId: null,
+    status: 'PLAYING',
+    playDeadline: null,
+    judgeDeadline: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides
@@ -411,6 +414,32 @@ describe('RoomService.handleHostLoss', () => {
     const room = await service.getRoom(ROOM_CODE);
     expect(room.hostId).toBe('host');
     expect(room.status).toBe('IN_PROGRESS');
+  });
+});
+
+describe('RoomService.getActiveRound', () => {
+  it('returns the Round matching the Room current round number', async () => {
+    const { service } = buildService({
+      room: makeRoom({ round: 2 }),
+      players: [makePlayer({ id: 'player-judge', isJudge: true })],
+      rounds: [makeRound({ roundNumber: 1 }), makeRound({ id: 'round-2', roundNumber: 2 })],
+      playedCards: []
+    });
+
+    const round = await service.getActiveRound(ROOM_CODE);
+
+    expect(round?.id).toBe('round-2');
+  });
+
+  it('returns null when no Round matches the current round number', async () => {
+    const { service } = buildService({
+      room: makeRoom({ round: 9 }),
+      players: [makePlayer({ id: 'player-judge', isJudge: true })],
+      rounds: [makeRound({ roundNumber: 1 })],
+      playedCards: []
+    });
+
+    expect(await service.getActiveRound(ROOM_CODE)).toBeNull();
   });
 });
 
