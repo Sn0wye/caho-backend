@@ -1,8 +1,7 @@
 import type { App } from '@/app';
-import { basePack } from '@/cards/base-pack';
 import { NotFoundError } from '@/errors';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { CardService } from '@/services/CardService';
+import { CardServiceFactory } from '@/services/CardServiceFactory';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { z } from 'zod';
 
@@ -24,7 +23,7 @@ export const getRoomBlackCardController = async (app: App) => {
     async (req, _res) => {
       const { roomCode } = req.params;
 
-      const cardService = new CardService(roomCode, basePack);
+      const cardService = CardServiceFactory(roomCode);
 
       const blackCardId = await roomService.getRoomBlackCardId(roomCode);
 

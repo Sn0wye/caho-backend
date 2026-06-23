@@ -1,121 +1,70 @@
-import type { BlackCard, CardPack, WhiteCard } from '@/cards/base-pack';
-import { db } from '@/db';
-import { rooms } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import type { IRoomRepository } from '@/repositories/room';
+import type { BlackCard, ICardRepository } from '@/repositories/cards';
+import type { Room, WhiteCard } from '@/schemas';
 
+// Draws White/Black Cards for a Room from the DB-backed card pool, recording
+// each pick on the Room so a card never repeats within that Room. The picked
+// ledgers double as the draw record. Cards moved from the in-memory base pack
+// to the database in issue #5 (a 1:1 swap).
 export class CardService {
-  private readonly roomCode: string;
-  private readonly cardPacks: CardPack[];
-  private readonly db: typeof db;
+  constructor(
+    private readonly roomCode: string,
+    private readonly cardRepository: ICardRepository,
+    private readonly roomRepository: IRoomRepository
+  ) {}
 
-  constructor(roomCode: string, cardPacks: CardPack | CardPack[]) {
-    if (!Array.isArray(cardPacks)) {
-      // biome-ignore lint/style/noParameterAssign: this.cardPacks should be an array
-      cardPacks = [cardPacks];
+  private async getRoom(): Promise<Room> {
+    const room = await this.roomRepository.getRoomByCode(this.roomCode);
+    if (!room) {
+      throw new Error(`No Room found for code: ${this.roomCode}`);
     }
-    this.cardPacks = cardPacks;
-    this.roomCode = roomCode;
-    this.db = db;
-  }
-
-  private async getRandomWhiteCards(
-    cards: WhiteCard[],
-    count: number
-  ): Promise<WhiteCard[]> {
-    const { pickedWhiteCards } = (
-      await this.db
-        .select({
-          pickedWhiteCards: rooms.pickedWhiteCards
-        })
-        .from(rooms)
-        .where(eq(rooms.code, this.roomCode))
-        .limit(1)
-        .execute()
-    )[0];
-
-    const availableCards = cards.filter(card => {
-      return !pickedWhiteCards.includes(card.id);
-    });
-
-    const selectedCards: WhiteCard[] = [];
-
-    while (selectedCards.length < count && availableCards.length > 0) {
-      const randomIndex = Math.floor(Math.random() * availableCards.length);
-      const selectedCard = availableCards.splice(randomIndex, 1)[0];
-      selectedCards.push(selectedCard);
-    }
-
-    await this.db
-      .update(rooms)
-      .set({
-        pickedWhiteCards: [
-          ...pickedWhiteCards,
-          ...selectedCards.map(card => card.id)
-        ]
-      })
-      .where(eq(rooms.code, this.roomCode))
-      .execute();
-
-    return selectedCards;
-  }
-
-  private async getRandomBlackCard(cards: BlackCard[]): Promise<BlackCard> {
-    const { pickedBlackCards } = (
-      await this.db
-        .select({
-          pickedBlackCards: rooms.pickedBlackCards
-        })
-        .from(rooms)
-        .where(eq(rooms.code, this.roomCode))
-        .limit(1)
-        .execute()
-    )[0];
-
-    const availableCards = cards.filter(card => {
-      return !pickedBlackCards.includes(card.id);
-    });
-
-    const randomIndex = Math.floor(Math.random() * availableCards.length);
-
-    const selectedCard = availableCards[randomIndex];
-
-    await this.db
-      .update(rooms)
-      .set({
-        pickedBlackCards: [...pickedBlackCards, selectedCard.id],
-        currentBlackCardId: selectedCard.id
-      })
-      .where(eq(rooms.code, this.roomCode))
-      .execute();
-
-    return selectedCard;
+    return room;
   }
 
   public async getNewWhiteCards(count = 1): Promise<WhiteCard[]> {
-    const allWhiteCards = this.cardPacks.flatMap(pack => pack.cards.white);
-    return this.getRandomWhiteCards(allWhiteCards, count);
-  }
+    const room = await this.getRoom();
+    const cards = await this.cardRepository.drawWhiteCards({
+      count,
+      excludeIds: room.pickedWhiteCards
+    });
 
-  public async getWhiteCardById(id: string): Promise<WhiteCard | undefined> {
-    const allWhiteCards = this.cardPacks.flatMap(pack => pack.cards.white);
-    return allWhiteCards.find(card => card.id === id);
+    await this.roomRepository.update(this.roomCode, {
+      pickedWhiteCards: [...room.pickedWhiteCards, ...cards.map(c => c.id)]
+    });
+
+    return cards;
   }
 
   public async getNewBlackCard(): Promise<BlackCard> {
-    const allBlackCards = this.cardPacks.flatMap(pack => pack.cards.black);
-    return this.getRandomBlackCard(allBlackCards);
+    const room = await this.getRoom();
+    const card = await this.cardRepository.drawBlackCard({
+      excludeIds: room.pickedBlackCards
+    });
+
+    if (!card) {
+      throw new Error(`No Black Card left to draw for Room: ${this.roomCode}`);
+    }
+
+    await this.roomRepository.update(this.roomCode, {
+      pickedBlackCards: [...room.pickedBlackCards, card.id],
+      currentBlackCardId: card.id
+    });
+
+    return card;
+  }
+
+  public async getWhiteCardById(id: string): Promise<WhiteCard | undefined> {
+    return this.cardRepository.findWhiteCardById(id);
   }
 
   public async getBlackCardById(id: string): Promise<BlackCard | undefined> {
-    const allBlackCards = this.cardPacks.flatMap(pack => pack.cards.black);
-    return allBlackCards.find(card => card.id === id);
+    return this.cardRepository.findBlackCardById(id);
   }
 
   public async resetDeck(): Promise<void> {
-    await this.db
-      .update(rooms)
-      .set({ pickedWhiteCards: [], pickedBlackCards: [] })
-      .where(eq(rooms.code, this.roomCode))
-      .execute();
+    await this.roomRepository.update(this.roomCode, {
+      pickedWhiteCards: [],
+      pickedBlackCards: []
+    });
   }
 }

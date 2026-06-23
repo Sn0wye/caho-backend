@@ -30,8 +30,7 @@ import type {
 import type { CreateRoomDTO } from '@/dto/CreateRoom';
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
-import { basePack } from '@/cards/base-pack';
-import { CardService } from '../CardService';
+import { CardServiceFactory } from '../CardServiceFactory';
 import type { IRoundRepository } from '@/repositories/round';
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import { getRandomJudge } from '@/utils/getRandomJudge';
@@ -416,12 +415,14 @@ export class RoomService implements IRoomService {
       throw new NotFoundError(ROOM_ERRORS.PLAYER_NOT_FOUND);
     }
 
-    // TODO: PLEASE REMOVE THIS WHEN CARDS ARE IN THE DB
-    const currentWhiteCards = basePack.cards.white.filter(whiteCard =>
-      player.cardIds.includes(whiteCard.id)
+    // Resolve the player's Hand (stored as ids) against the DB card pool. See
+    // issue #5 (cards moved to the database).
+    const cardService = CardServiceFactory(roomCode);
+    const hand = await Promise.all(
+      player.cardIds.map(id => cardService.getWhiteCardById(id))
     );
 
-    return currentWhiteCards;
+    return hand.filter((card): card is WhiteCard => card !== undefined);
   }
 
   public async playCards(
@@ -623,8 +624,7 @@ export class RoomService implements IRoomService {
       throw new NotFoundError(ROOM_ERRORS.ROUND_NOT_FOUND);
     }
 
-    // TODO: refactor card service to use the db
-    const cardService = new CardService(roomCode, basePack);
+    const cardService = CardServiceFactory(roomCode);
     const newBlackCard = await cardService.getNewBlackCard();
 
     const nextJudgeId = getRandomJudge(room.prevJudgeId, players);

@@ -1,8 +1,7 @@
 import type { App } from '@/app';
-import { basePack } from '@/cards/base-pack';
 import { ROOM_ERRORS } from '@/errors/room';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { CardService } from '@/services/CardService';
+import { CardServiceFactory } from '@/services/CardServiceFactory';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 import { getRandomJudge } from '@/utils/getRandomJudge';
@@ -27,7 +26,7 @@ export const startRoomController = async (app: App) => {
       const user = req.getUser();
 
       const { roomCode } = startRoom.parse(req.body);
-      const cardService = new CardService(roomCode, basePack);
+      const cardService = CardServiceFactory(roomCode);
       let room = await roomService.getRoom(roomCode);
 
       if (user.id !== room.hostId) {
