@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 export const env = createEnv({
   server: {
-    PORT: z.coerce.number().default(8081),
+    PORT: z.coerce.number().default(8080),
     NODE_ENV: z.enum(['production', 'development', 'test']),
     COOKIE_SECRET: z.string().min(1),
     PASSWORD_SECRET: z.string().min(1),
@@ -16,7 +16,7 @@ export const env = createEnv({
     GOOGLE_REDIRECT_URL: z.string().min(1),
     FRONTEND_AUTH_REDIRECT_URL: z.string().min(1),
     SEQ_URL: z.string().url().optional(),
-    SEQ_API_KEY: z.string().min(1).optional(),
+    SEQ_API_KEY: z.string().min(1).optional()
   },
   runtimeEnv: process.env
 });

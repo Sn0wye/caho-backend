@@ -46,8 +46,7 @@ services:
     restart: unless-stopped
     environment:
       ACCEPT_EULA: Y
-      # latest seq refuses first run without auth config; local stack opts out
-      SEQ_FIRSTRUN_NOAUTHENTICATION: 'true'
+      SEQ_FIRSTRUN_ADMINPASSWORD: caho
     ports:
       - '5341:80'
     volumes:
@@ -64,9 +63,8 @@ services:
     env_file: ./.env.docker
     environment:
       SEQ_URL: http://caho-seq:5341
-      SEQ_FIRSTRUN_ADMINPASSWORD: caho
     ports:
-      - '8081:8081'
+      - '8080:8080'
     networks:
       - caho
     depends_on:
