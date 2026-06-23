@@ -1,5 +1,7 @@
+import type { RoomEvent } from '@/contracts';
 import type { Round, RoundStatus } from '@/schemas';
-import type { IRoundRotator } from './IRoundRotator';
+import type { IRoundEventPublisher } from './IRoundEventPublisher';
+import type { IRoundRotator, RoundRotation } from './IRoundRotator';
 import type { IRoundTimerRepository } from './IRoundTimerRepository';
 import type { IRoundTimerStore } from './IRoundTimerStore';
 
@@ -80,7 +82,8 @@ export class FakeRoundTimerRepository implements IRoundTimerRepository {
 }
 
 // Records every rotation so specs can assert a Round aborted-and-rotated exactly
-// once (idempotency) without the full RoomService.startNextRound machinery.
+// once (idempotency) without the full RoomService.startNextRound machinery, and
+// returns a stub next Round so the round-start broadcast has a payload.
 export class FakeRoundRotator implements IRoundRotator {
   public readonly rotations: Array<{ roomCode: string; currentRound: number }> =
     [];
@@ -88,8 +91,21 @@ export class FakeRoundRotator implements IRoundRotator {
   async startNextRound(
     roomCode: string,
     currentRound: number
-  ): Promise<unknown> {
+  ): Promise<RoundRotation> {
     this.rotations.push({ roomCode, currentRound });
-    return { roomCode, currentRound };
+    return {
+      roundNumber: currentRound + 1,
+      blackCard: { text: 'next black card', pick: 1, packId: 'fake-pack' }
+    };
+  }
+}
+
+// Records published Room events so specs can assert a timer-driven advance
+// broadcast the right event exactly once.
+export class FakeRoundEventPublisher implements IRoundEventPublisher {
+  public readonly published: Array<{ channel: string; event: RoomEvent }> = [];
+
+  async publish(channel: string, event: RoomEvent): Promise<void> {
+    this.published.push({ channel, event });
   }
 }
