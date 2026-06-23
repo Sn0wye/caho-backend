@@ -1,4 +1,9 @@
-import { auth, githubAuth, googleAuth } from '@/auth/lucia';
+import { githubAuth, googleAuth } from '@/auth/oauth';
+import {
+  createBlankSessionCookie,
+  createSessionCookie
+} from '@/auth/session-cookie';
+import { generateSessionToken } from '@/auth/session-token';
 import { db } from '@/db';
 import { oauthAccounts, users } from '@/db/schema';
 import { env } from '@/env';
@@ -8,9 +13,11 @@ import {
   UnauthorizedError
 } from '@/errors';
 import type { IUserRepository } from '@/repositories/user/IUserRepository';
+import type { SessionService } from '@/services/auth/SessionService';
 import { hash, verify } from '@/utils/password';
 import { createId } from '@paralleldrive/cuid2';
 import {
+  ArcticFetchError,
   generateCodeVerifier,
   generateState,
   OAuth2RequestError
@@ -37,8 +44,20 @@ type GoogleUser = {
 export class AuthService {
   db: typeof db;
 
-  constructor(private readonly userRepository: IUserRepository) {
+  constructor(
+    private readonly userRepository: IUserRepository,
+    private readonly sessionService: SessionService
+  ) {
     this.db = db;
+  }
+
+  // Mint a fresh session token, persist its session, and return the cookie that
+  // carries the raw token. Centralizes the token→session→cookie flow shared by
+  // password and OAuth sign-in.
+  private async issueSession(userId: string) {
+    const token = generateSessionToken();
+    await this.sessionService.createSession(token, userId);
+    return createSessionCookie(token);
   }
 
   public async signIn(username: string, password: string) {
@@ -54,9 +73,7 @@ export class AuthService {
       throw new UnauthorizedError('Usuário ou senha inválidos');
     }
 
-    const session = await auth.createSession(user.id, {});
-
-    const cookie = auth.createSessionCookie(session.id);
+    const cookie = await this.issueSession(user.id);
 
     return {
       cookie,
@@ -94,9 +111,7 @@ export class AuthService {
       avatarUrl: dbUser.avatarUrl
     };
 
-    const session = await auth.createSession(user.id, {});
-
-    const cookie = auth.createSessionCookie(session.id);
+    const cookie = await this.issueSession(user.id);
 
     return {
       cookie,
@@ -105,15 +120,15 @@ export class AuthService {
   }
 
   public async signOut(sessionId: string) {
-    await auth.invalidateSession(sessionId);
-    const cookie = auth.createBlankSessionCookie();
-
-    return cookie;
+    await this.sessionService.invalidateSession(sessionId);
+    return createBlankSessionCookie();
   }
 
   public async signInWithGithub() {
     const state = generateState();
-    const url = await githubAuth.createAuthorizationURL(state);
+    // No extra scopes: the public profile read below only needs the default
+    // user data, matching the pre-arctic-v3 behavior.
+    const url = githubAuth.createAuthorizationURL(state, []);
 
     return {
       state,
@@ -132,7 +147,7 @@ export class AuthService {
       );
       const githubUserResponse = await fetch('https://api.github.com/user', {
         headers: {
-          Authorization: `Bearer ${tokens.accessToken}`
+          Authorization: `Bearer ${tokens.accessToken()}`
         }
       });
       const githubUser: GithubUser = await githubUserResponse.json();
@@ -148,8 +163,7 @@ export class AuthService {
         .execute();
 
       if (existingAccount) {
-        const session = await auth.createSession(existingAccount.userId, {});
-        const cookie = auth.createSessionCookie(session.id);
+        const cookie = await this.issueSession(existingAccount.userId);
 
         return {
           cookie,
@@ -187,15 +201,14 @@ export class AuthService {
           .execute();
       });
 
-      const session = await auth.createSession(userId, {});
-      const cookie = auth.createSessionCookie(session.id);
+      const cookie = await this.issueSession(userId);
 
       return {
         cookie,
         redirectUrl: env.FRONTEND_AUTH_REDIRECT_URL
       };
     } catch (e) {
-      if (e instanceof OAuth2RequestError) {
+      if (e instanceof OAuth2RequestError || e instanceof ArcticFetchError) {
         throw new BadRequestError('Invalid code');
       }
 
@@ -207,9 +220,10 @@ export class AuthService {
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
 
-    const url = await googleAuth.createAuthorizationURL(state, codeVerifier, {
-      scopes: ['profile', 'email']
-    });
+    const url = googleAuth.createAuthorizationURL(state, codeVerifier, [
+      'profile',
+      'email'
+    ]);
 
     return {
       redirectUrl: url.toString(),
@@ -235,7 +249,7 @@ export class AuthService {
         'https://openidconnect.googleapis.com/v1/userinfo',
         {
           headers: {
-            Authorization: `Bearer ${tokens.accessToken}`
+            Authorization: `Bearer ${tokens.accessToken()}`
           }
         }
       );
@@ -257,8 +271,7 @@ export class AuthService {
         .execute();
 
       if (existingAccount) {
-        const session = await auth.createSession(existingAccount.userId, {});
-        const cookie = auth.createSessionCookie(session.id);
+        const cookie = await this.issueSession(existingAccount.userId);
 
         return {
           cookie,
@@ -297,15 +310,14 @@ export class AuthService {
           .execute();
       });
 
-      const session = await auth.createSession(userId, {});
-      const cookie = auth.createSessionCookie(session.id);
+      const cookie = await this.issueSession(userId);
 
       return {
         cookie,
         redirectUrl: env.FRONTEND_AUTH_REDIRECT_URL
       };
     } catch (e) {
-      if (e instanceof OAuth2RequestError) {
+      if (e instanceof OAuth2RequestError || e instanceof ArcticFetchError) {
         throw new BadRequestError('Invalid code');
       }
 
