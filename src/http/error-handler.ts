@@ -6,6 +6,7 @@ import {
   UnauthorizedError,
   UnprocessableEntityError
 } from '@/errors';
+import { STATUS_CODES } from 'node:http';
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
@@ -29,20 +30,32 @@ export const fastifyErrorHandler: FastifyInstance['errorHandler'] = (
 };
 
 function sendApplicationError(error: Error, res: Reply) {
-  if (error instanceof BadRequestError) return res.badRequest(error.message);
-  if (error instanceof UnauthorizedError) return res.unauthorized(error.message);
-  if (error instanceof ForbiddenError) return res.forbidden(error.message);
-  if (error instanceof NotFoundError) return res.notFound(error.message);
-  if (error instanceof UnprocessableEntityError) {
-    return res.unprocessableEntity(error.message);
-  }
-  if (error instanceof InternalServerError) {
-    return res.internalServerError(error.message);
-  }
-  // Fastify's own errors (e.g. schema validation) carry a 4xx statusCode.
+  const statusCode = statusCodeOf(error);
+  const unexpected = statusCode === 500 && !(error instanceof InternalServerError);
+
+  // Unexpected errors may carry driver or library internals; log them, but
+  // don't send them to the client.
+  if (unexpected) res.log.error(error);
+
+  // Send the `errorSchema` shape explicitly. Routes declare it for their error
+  // responses, and a bare `{ message }` fails serialization, replacing the
+  // message with "Response doesn't match the schema".
+  return res.status(statusCode).send({
+    error: STATUS_CODES[statusCode] ?? 'Error',
+    statusCode,
+    message: unexpected ? 'Internal Server Error' : error.message
+  });
+}
+
+function statusCodeOf(error: Error): number {
+  if (error instanceof BadRequestError) return 400;
+  if (error instanceof UnauthorizedError) return 401;
+  if (error instanceof ForbiddenError) return 403;
+  if (error instanceof NotFoundError) return 404;
+  if (error instanceof UnprocessableEntityError) return 422;
+  if (error instanceof InternalServerError) return 500;
+  // Fastify's own and @fastify/sensible's errors carry their statusCode.
   const statusCode = (error as { statusCode?: number }).statusCode;
-  if (statusCode && statusCode < 500) {
-    return res.status(statusCode).send({ message: error.message });
-  }
-  return res.internalServerError(error.message);
+  if (statusCode && statusCode >= 400 && statusCode < 500) return statusCode;
+  return 500;
 }

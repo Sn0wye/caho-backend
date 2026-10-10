@@ -15,11 +15,15 @@ export const env = createEnv({
     GOOGLE_CLIENT_SECRET: z.string().min(1),
     GOOGLE_REDIRECT_URL: z.string().min(1),
     FRONTEND_AUTH_REDIRECT_URL: z.string().min(1),
+    // Parent domain shared with the frontend (e.g. caho.com.br), so the session
+    // cookie OAuth callbacks set here also reaches the frontend's server.
+    COOKIE_DOMAIN: z.string().min(1).optional(),
     SEQ_URL: z.string().url().optional(),
     SEQ_API_KEY: z.string().min(1).optional()
   },
   runtimeEnv: {
     ...process.env,
+    COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || undefined,
     SEQ_URL: process.env.SEQ_URL || undefined,
     SEQ_API_KEY: process.env.SEQ_API_KEY || undefined
   }

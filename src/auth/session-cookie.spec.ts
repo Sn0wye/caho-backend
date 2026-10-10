@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SESSION_COOKIE_NAME,
   createBlankSessionCookie,
@@ -51,5 +51,33 @@ describe('readBearerToken', () => {
   it('returns null for missing or non-Bearer headers', () => {
     expect(readBearerToken('')).toBeNull();
     expect(readBearerToken('Basic abc')).toBeNull();
+  });
+});
+
+describe('session cookie domain', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('scopes set and blank cookies to COOKIE_DOMAIN when configured', async () => {
+    vi.stubEnv('COOKIE_DOMAIN', 'caho.com.br');
+    vi.resetModules();
+    const cookies = await import('./session-cookie');
+
+    expect(cookies.createSessionCookie('tok').attributes.domain).toBe(
+      'caho.com.br'
+    );
+    expect(cookies.createBlankSessionCookie().attributes.domain).toBe(
+      'caho.com.br'
+    );
+  });
+
+  it('keeps a host-only cookie when COOKIE_DOMAIN is empty', async () => {
+    vi.stubEnv('COOKIE_DOMAIN', '');
+    vi.resetModules();
+    const cookies = await import('./session-cookie');
+
+    expect(cookies.createSessionCookie('tok').attributes.domain).toBeUndefined();
   });
 });

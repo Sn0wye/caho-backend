@@ -13,6 +13,7 @@ type CookieAttributes = {
   path: string;
   secure: boolean;
   maxAge: number;
+  domain?: string;
 };
 
 export type SessionCookie = {
@@ -27,7 +28,8 @@ function baseAttributes(maxAge: number): CookieAttributes {
     sameSite: 'lax',
     path: '/',
     secure: env.NODE_ENV === 'production',
-    maxAge
+    maxAge,
+    domain: env.COOKIE_DOMAIN
   };
 }
 
