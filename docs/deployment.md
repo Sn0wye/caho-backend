@@ -65,7 +65,7 @@ PORT=8080
 COOKIE_SECRET=<random-production-secret>
 PASSWORD_SECRET=<random-production-secret>
 DATABASE_URL=postgres://<user>:<url-encoded-password>@<postgres-host>:5432/<database>
-REDIS_URL=redis://:<url-encoded-password>@<redis-host>:6379
+REDIS_URL=redis://<redis-user>:<url-encoded-password>@<redis-host>:6379/0
 GITHUB_CLIENT_ID=<github-oauth-client-id>
 GITHUB_CLIENT_SECRET=<github-oauth-client-secret>
 GOOGLE_CLIENT_ID=<google-oauth-client-id>
@@ -80,7 +80,22 @@ CORS currently permits `https://caho.com.br`; another frontend domain requires
 updating `src/app.ts` before deployment.
 
 `SEQ_URL` is optional. Omit it when Seq is unused; an empty value fails URL
-validation. PostgreSQL and Redis are separate resources, not part of this image.
+validation. For an authenticated shared Seq server, also set `SEQ_API_KEY`.
+Use its private ingestion URL, `http://<seq-host>:5341`, and a dedicated
+**Ingest-only** key for CAHO production. Attach `Application=caho`,
+`Service=caho-backend`, and `Environment=production` to that key in Seq.
+Enable authenticated HTTP ingestion. Never give the application an admin key
+or permission to read other projects' logs. A saved signal matching
+`Application = 'caho' and Environment = 'production'` separates CAHO logs.
+
+Keep Redis and Seq under Coolify's Shared Resources project, reachable through
+the private Docker network. Pin each image to a tested version and digest.
+CAHO currently needs Redis database 0, keys matching `round:*`, room/player
+Pub/Sub channels, and the `__keyevent@0__:expired` subscription. A dedicated
+Redis instance and user avoid sharing its unprefixed channels with other apps.
+Set expiry notifications in server configuration so CAHO does not need
+`CONFIG SET`. PostgreSQL, Redis, and Seq are separate resources, not part of
+the CAHO image.
 
 ## GitHub secrets and first deployment
 
