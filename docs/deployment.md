@@ -72,10 +72,20 @@ GOOGLE_CLIENT_ID=<google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
 GOOGLE_REDIRECT_URL=https://<api-domain>/auth/google/callback
 FRONTEND_AUTH_REDIRECT_URL=https://caho.com.br/dashboard
+COOKIE_DOMAIN=caho.com.br
 ```
 
 OAuth values are required by environment validation even when users only sign
-in with passwords. Configure callback URLs in both OAuth providers. Production
+in with passwords. Configure callback URLs in both OAuth providers:
+`https://<api-domain>/auth/github/callback` on the GitHub OAuth app and
+`https://<api-domain>/auth/google/callback` on the Google client. Use `https`
+in `GOOGLE_REDIRECT_URL`; Google rejects a redirect URI that differs from the
+registered one.
+
+The OAuth callback sets the session cookie on the API's response.
+`COOKIE_DOMAIN` must be the parent domain shared with the frontend, so the
+frontend's server receives that cookie and sees the user as signed in. Without
+it, the cookie stays on the API host and OAuth sign-in returns to `/login`. Production
 CORS currently permits `https://caho.com.br`; another frontend domain requires
 updating `src/app.ts` before deployment.
 
