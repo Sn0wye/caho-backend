@@ -131,7 +131,7 @@ redeploy. Restore `latest` to resume automatic image updates.
 The default Compose stack starts without Seq. To opt into local Seq logging:
 
 ```sh
-SEQ_URL=http://seq:5341 docker compose --profile observability up -d
+rtk proxy env SEQ_URL=http://seq:80 docker compose --profile observability up -d
 ```
 
 ```sh
@@ -146,8 +146,7 @@ rtk proxy curl --fail http://localhost:8080/ping
 ## Ampere A1 runtime and CI efficiency
 
 The deployment targets one API instance on an Ampere A1 ARM64 server with
-24 GB RAM. The image starts one Node process. Production logging writes JSON
-directly to stdout, avoiding the development formatter's worker thread.
+24 GB RAM. The image starts one Node process. Logging writes structured JSON directly to stdout in every environment.
 Production SQL query logging is disabled to avoid serializing every query and
 its parameters. Seq shipping remains available when `SEQ_URL` is configured.
 
@@ -202,3 +201,51 @@ Coolify references:
 Build references:
 [pnpm Docker caching](https://pnpm.io/docker),
 [GitHub Actions BuildKit cache behavior](https://docs.docker.com/build/ci/github-actions/cache/).
+
+
+## Seq logs and traces
+
+Set `SEQ_URL` to your existing Seq instance's base URL and `SEQ_API_KEY` to an
+API key with ingest permission. The API sends logs through Pino and traces through
+OTLP HTTP/protobuf to `<SEQ_URL>/ingest/otlp/v1/traces`. Seq must support trace
+ingestion, available since Seq 2024.1. No collector is required. `trace_id` and
+`span_id` on Pino events map to Seq's native trace and span fields.
+
+```dotenv
+SEQ_URL=https://seq.example.com
+SEQ_API_KEY=<ingest-key>
+LOG_LEVEL=info
+OTEL_SERVICE_NAME=caho-backend
+OTEL_TRACES_SAMPLER_ARG=1
+OTEL_SDK_DISABLED=false
+```
+
+In Compose the Seq service listens on port 80; use `http://seq:80` from the API
+container. From a host-run API use `http://localhost:5341`. The browser UI also
+uses `http://localhost:5341`. Keep your existing production Seq resource and URL.
+
+Traces cover HTTP routes, PostgreSQL, Redis, outbound OAuth fetches, Pub/Sub
+publication and delivery, and Round expiry/reconciliation. Successful health
+probes produce no request events or spans. Failures remain logged. Request events
+include route templates, status and duration without query strings or bodies.
+`x-request-id` on traced HTTP responses identifies the request in logs.
+
+`OTEL_TRACES_SAMPLER_ARG` is the root trace sample ratio, 0 through 1. Default 1
+records every root trace; valid incoming W3C trace context preserves its sampling
+decision. Sampling does not suppress application logs. `OTEL_SDK_DISABLED=true`
+disables tracing while keeping logs. Omit both Seq URL and an explicit traces
+endpoint to run without telemetry export. `LOG_LEVEL=debug` enables detailed
+presence, card-count, timer and Pub/Sub metadata logs. Keep `info` for normal use.
+
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` optionally overrides the full traces URL.
+The override does not receive `SEQ_API_KEY`; use standard
+`OTEL_EXPORTER_OTLP_TRACES_HEADERS` for collector authentication. Metrics and
+OTEL log export are disabled to avoid duplicate ingestion.
+
+During shutdown, the API closes HTTP/WS, PostgreSQL and Redis, flushes traces, then
+flushes Seq logs. It allows ten seconds before forcing exit. Export failure events
+write directly to stdout, so check container logs when Seq is unavailable.
+
+See [logging audit](logging-audit.md) for keep/remove/add decisions and Seq queries.
+Protocol references: [Seq tracing from Node.js](https://datalust.co/docs/tracing-from-nodejs),
+[OpenTelemetry OTLP configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/).

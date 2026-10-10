@@ -1,3 +1,5 @@
+import { buildLogger } from '@/lib/logger';
+import { FakeConsoleOutput } from '@/lib/logger.fakes';
 import type { Round, RoundPlayedCard } from '@/schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeRoundPlayedCardsRepository } from '../room/RoomService.fakes';
@@ -56,7 +58,7 @@ type Fakes = {
 function buildTimekeeper(args: {
   rounds: Round[];
   playedCards?: RoundPlayedCard[];
-}): { timekeeper: RoundTimekeeper; fakes: Fakes } {
+}): { timekeeper: RoundTimekeeper; fakes: Fakes; output: FakeConsoleOutput } {
   const fakes: Fakes = {
     store: new FakeRoundTimerStore(),
     rounds: new FakeRoundTimerRepository(args.rounds),
@@ -65,16 +67,19 @@ function buildTimekeeper(args: {
     publisher: new FakeRoundEventPublisher()
   };
 
+  const output = new FakeConsoleOutput();
+  const { logger } = buildLogger(undefined, true, output);
   const timekeeper = new RoundTimekeeper(
     fakes.store,
     fakes.rounds,
     fakes.playedCards,
     fakes.rotator,
     fakes.publisher,
-    { playWindowSeconds: 60, judgeGraceSeconds: 30, judgeWindowSeconds: 90 }
+    { playWindowSeconds: 60, judgeGraceSeconds: 30, judgeWindowSeconds: 90 },
+    logger
   );
 
-  return { timekeeper, fakes };
+  return { timekeeper, fakes, output };
 }
 
 describe('RoundTimekeeper.armPlayDeadline', () => {
@@ -415,5 +420,27 @@ describe('RoundTimekeeper.onJudgeReturned', () => {
     await timekeeper.onJudgeReturned(ROUND_ID);
 
     expect(fakes.store.armed.get(judgeKey(ROUND_ID))).toBe(90);
+  });
+});
+
+
+describe('Round timer logging', () => {
+  it('logs only the winning judging transition without private cards', async () => {
+    const { timekeeper, output } = buildTimekeeper({ rounds: [makeRound()] });
+    await timekeeper.advanceToJudging(makeRound(), [makePlayedCard('player-a')]);
+    await timekeeper.advanceToJudging(makeRound(), [makePlayedCard('player-a')]);
+    expect(output.lines.map(line => JSON.parse(line).event)).toEqual(['round.judging_started']);
+    expect(JSON.parse(output.lines[0])).toMatchObject({ roomCode: ROOM_CODE, roundId: ROUND_ID, playedCount: 1 });
+    expect(output.lines.join('')).not.toContain('whiteCards');
+  });
+
+  it('records reconciliation counts and an idempotent abort', async () => {
+    const { timekeeper, output } = buildTimekeeper({ rounds: [makeRound({ playDeadline: new Date(0) })] });
+    await timekeeper.reconcile();
+    await timekeeper.onPlayExpired(ROUND_ID);
+    expect(output.lines.map(line => JSON.parse(line).event)).toEqual([
+      'round.reconciliation_started', 'round.aborted', 'round.reconciliation_completed'
+    ]);
+    expect(JSON.parse(output.lines[1])).toMatchObject({ phase: 'PLAYING', roundNumber: 1, level: 40 });
   });
 });

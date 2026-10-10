@@ -1,5 +1,6 @@
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import type { Round, RoundPlayedCard } from '@/schemas';
+import type { Logger } from 'pino';
 import type { IRoundEventPublisher } from './IRoundEventPublisher';
 import type { IRoundRotator } from './IRoundRotator';
 import type { IRoundTimerRepository } from './IRoundTimerRepository';
@@ -34,7 +35,8 @@ export class RoundTimekeeper {
     private readonly playedCards: IRoundPlayedCardsRepository,
     private readonly rotator: IRoundRotator,
     private readonly publisher: IRoundEventPublisher,
-    private readonly config: RoundTimerConfig = DEFAULT_ROUND_TIMER_CONFIG
+    private readonly config: RoundTimerConfig = DEFAULT_ROUND_TIMER_CONFIG,
+    private readonly log?: Logger
   ) {}
 
   // Start a Round's play window: arm the Redis TTL key and persist the deadline
@@ -46,6 +48,10 @@ export class RoundTimekeeper {
       status: 'PLAYING',
       playDeadline: new Date(Date.now() + ttl * 1000)
     });
+    this.log?.debug(
+      { event: 'round.play_deadline_armed', roundId, ttlSeconds: ttl },
+      'Play deadline armed'
+    );
   }
 
   // Play window elapsed: Players who didn't submit are simply skipped. If anyone
@@ -81,8 +87,20 @@ export class RoundTimekeeper {
     round: Round,
     plays: RoundPlayedCard[]
   ): Promise<boolean> {
-    const claimed = await this.rounds.claimAdvance(round.id, 'PLAYING', 'JUDGING');
+    const claimed = await this.rounds.claimAdvance(
+      round.id,
+      'PLAYING',
+      'JUDGING'
+    );
     if (!claimed) {
+      this.log?.debug(
+        {
+          event: 'round.transition_skipped',
+          roundId: round.id,
+          expectedPhase: 'PLAYING'
+        },
+        'Round transition already claimed'
+      );
       return false;
     }
 
@@ -93,6 +111,16 @@ export class RoundTimekeeper {
       event: 'room.time-to-judge',
       payload: { roundNumber: round.roundNumber, roundPlayedCards: plays }
     });
+    this.log?.info(
+      {
+        event: 'round.judging_started',
+        roomCode: round.roomCode,
+        roundId: round.id,
+        roundNumber: round.roundNumber,
+        playedCount: plays.length
+      },
+      'Round advanced to judging'
+    );
     return true;
   }
 
@@ -102,6 +130,14 @@ export class RoundTimekeeper {
   // backstop for the startup sweep.
   public async armJudgeGrace(roundId: string): Promise<void> {
     await this.armJudgeDeadline(roundId, this.config.judgeGraceSeconds);
+    this.log?.info(
+      {
+        event: 'round.judge_grace_armed',
+        roundId,
+        ttlSeconds: this.config.judgeGraceSeconds
+      },
+      'Judge reconnect grace armed'
+    );
   }
 
   // The dropped Judge reconnected (ADR-0002: "held awaiting reconnect"). While
@@ -110,6 +146,11 @@ export class RoundTimekeeper {
   // running and aborted the Round anyway.
   public async onJudgeReturned(roundId: string): Promise<void> {
     const round = await this.rounds.findById(roundId);
+    if (round && ['PLAYING', 'JUDGING'].includes(round.status))
+      this.log?.info(
+        { event: 'round.judge_returned', roundId, phase: round.status },
+        'Judge returned'
+      );
     if (round?.status === 'JUDGING') {
       await this.armJudgeDeadline(roundId, this.config.judgeWindowSeconds);
       return;
@@ -159,9 +200,23 @@ export class RoundTimekeeper {
   // event path; the idempotent claim makes it safe to run alongside a subscriber.
   public async reconcile(): Promise<void> {
     const stale = await this.rounds.findExpiredActive(new Date());
+    this.log?.info(
+      {
+        event: 'round.reconciliation_started',
+        expiredRoundCount: stale.length
+      },
+      'Expired Round reconciliation started'
+    );
     for (const round of stale) {
       await this.advanceExpired(round);
     }
+    this.log?.info(
+      {
+        event: 'round.reconciliation_completed',
+        expiredRoundCount: stale.length
+      },
+      'Expired Round reconciliation completed'
+    );
   }
 
   // Route a Round known to be past a deadline to the matching transition. A
@@ -188,6 +243,16 @@ export class RoundTimekeeper {
     if (!claimed) {
       return;
     }
+    this.log?.warn(
+      {
+        event: 'round.aborted',
+        roomCode: round.roomCode,
+        roundId: round.id,
+        roundNumber: round.roundNumber,
+        phase: round.status
+      },
+      'Round aborted without a winner'
+    );
 
     // Tell the Room the Round died with no winner before announcing the next one,
     // so the frontend can render "aborted, nobody scored" rather than inferring it

@@ -6,6 +6,19 @@ afterEach(() => {
 });
 
 describe('optional development Seq settings', () => {
+  it('defaults to safe logging and accepts optional telemetry settings', async () => {
+    vi.stubEnv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', '');
+    vi.stubEnv('LOG_LEVEL', 'debug');
+    vi.stubEnv('OTEL_TRACES_SAMPLER_ARG', '0.25');
+    vi.stubEnv('OTEL_SDK_DISABLED', 'true');
+    vi.resetModules();
+    const { env } = await import('./env');
+    expect(env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT).toBeUndefined();
+    expect(env.OTEL_TRACES_SAMPLER_ARG).toBe(0.25);
+    expect(env.OTEL_SDK_DISABLED).toBe('true');
+    expect(env.LOG_LEVEL).toBe('debug');
+    expect(env.OTEL_SERVICE_NAME).toBe('caho-backend');
+  });
   it.each([undefined, ''])(
     'starts without Seq when settings are %s',
     async setting => {
@@ -13,7 +26,9 @@ describe('optional development Seq settings', () => {
       vi.stubEnv('SEQ_URL', setting ?? '');
       vi.stubEnv('SEQ_API_KEY', setting ?? '');
       if (setting === undefined) {
+        // biome-ignore lint/performance/noDelete: Node converts undefined assignments to a literal string.
         delete process.env.SEQ_URL;
+        // biome-ignore lint/performance/noDelete: Exercise an absent variable, not the string undefined.
         delete process.env.SEQ_API_KEY;
       }
       vi.resetModules();

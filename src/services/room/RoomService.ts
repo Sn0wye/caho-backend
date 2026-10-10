@@ -86,8 +86,8 @@ export class RoomService implements IRoomService {
       });
 
       return room;
-    } catch (e) {
-      throw new InternalServerError('Erro ao criar sala.');
+    } catch (error) {
+      throw new InternalServerError('Erro ao criar sala.', { cause: error });
     }
   }
 
@@ -109,8 +109,10 @@ export class RoomService implements IRoomService {
         roomCode,
         player
       });
-    } catch (e) {
-      throw new InternalServerError('Erro ao adicionar jogador na sala.');
+    } catch (error) {
+      throw new InternalServerError('Erro ao adicionar jogador na sala.', {
+        cause: error
+      });
     }
   }
 
@@ -123,7 +125,8 @@ export class RoomService implements IRoomService {
     requesterId: string
   ): Promise<GameStart> {
     const room = await this.getRoom(roomCode);
-    const players = await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+    const players =
+      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
     assertRoomCanStart(room, players, requesterId);
 
     const judgeId = getRandomJudge(null, players);
@@ -137,7 +140,10 @@ export class RoomService implements IRoomService {
       currentBlackCardId: blackCard.id
     });
 
-    const hands = await this.dealInitialHands({ roomCode, cardsPerPlayer: HAND_SIZE });
+    const hands = await this.dealInitialHands({
+      roomCode,
+      cardsPerPlayer: HAND_SIZE
+    });
     const round = await this.createRound({
       roomCode,
       judgeId,
@@ -145,9 +151,16 @@ export class RoomService implements IRoomService {
       roundNumber: 1,
       roundWinnerId: null
     });
-    const startedPlayers = await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+    const startedPlayers =
+      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
 
-    return { room: startedRoom, players: startedPlayers, round, blackCard, hands };
+    return {
+      room: startedRoom,
+      players: startedPlayers,
+      round,
+      blackCard,
+      hands
+    };
   }
 
   // Single end-of-game path: both the host's manual /end and the maxPoints
@@ -165,7 +178,9 @@ export class RoomService implements IRoomService {
 
       return ranking;
     } catch (error) {
-      throw new InternalServerError('Erro ao finalizar sala.');
+      throw new InternalServerError('Erro ao finalizar sala.', {
+        cause: error
+      });
     }
   }
 
@@ -174,11 +189,17 @@ export class RoomService implements IRoomService {
   // rotating Rounds when the timers fired. ADR-0003.
   private async abortActiveRound(roomCode: string): Promise<void> {
     const room = await this.roomRepository.getRoomByCode(roomCode);
-    const round = room ? await this.roundsRepository.find(roomCode, room.round) : null;
+    const round = room
+      ? await this.roundsRepository.find(roomCode, room.round)
+      : null;
     if (!round) {
       return;
     }
-    await this.roundsRepository.claimAdvance(round.id, ['PLAYING', 'JUDGING'], 'ABORTED');
+    await this.roundsRepository.claimAdvance(
+      round.id,
+      ['PLAYING', 'JUDGING'],
+      'ABORTED'
+    );
   }
 
   public async joinRoom(input: JoinRoomDTO): Promise<Room> {
@@ -200,7 +221,9 @@ export class RoomService implements IRoomService {
         throw error;
       }
 
-      throw new InternalServerError('Erro ao entrar na sala.');
+      throw new InternalServerError('Erro ao entrar na sala.', {
+        cause: error
+      });
     }
   }
 
@@ -234,7 +257,7 @@ export class RoomService implements IRoomService {
       // separate path that keeps them as an Inactive Player. See ADR-0002.
       await this.roomPlayersRepository.deletePlayerFromRoom(roomCode, playerId);
     } catch (error) {
-      throw new InternalServerError('Erro ao sair da sala.');
+      throw new InternalServerError('Erro ao sair da sala.', { cause: error });
     }
   }
 
@@ -363,8 +386,10 @@ export class RoomService implements IRoomService {
       const players =
         await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
       return players;
-    } catch {
-      throw new InternalServerError('Erro ao buscar jogadores da sala.');
+    } catch (error) {
+      throw new InternalServerError('Erro ao buscar jogadores da sala.', {
+        cause: error
+      });
     }
   }
 
@@ -385,8 +410,10 @@ export class RoomService implements IRoomService {
         playerId,
         payload
       );
-    } catch {
-      throw new InternalServerError('Erro ao atualizar jogador na sala.');
+    } catch (error) {
+      throw new InternalServerError('Erro ao atualizar jogador na sala.', {
+        cause: error
+      });
     }
 
     return await this.getPlayerFromRoom(roomCode, playerId);
@@ -418,7 +445,8 @@ export class RoomService implements IRoomService {
       return await this.roomPlayersRepository.incrementPlayerScore(input);
     } catch (error) {
       throw new InternalServerError(
-        'Erro ao incrementar pontuação do jogador.'
+        'Erro ao incrementar pontuação do jogador.',
+        { cause: error }
       );
     }
   }
@@ -429,8 +457,10 @@ export class RoomService implements IRoomService {
   ): Promise<Room> {
     try {
       return await this.roomRepository.update(roomCode, data);
-    } catch {
-      throw new InternalServerError('Erro ao atualizar sala.');
+    } catch (error) {
+      throw new InternalServerError('Erro ao atualizar sala.', {
+        cause: error
+      });
     }
   }
 
@@ -461,8 +491,16 @@ export class RoomService implements IRoomService {
   ): Promise<PlayResult> {
     const round = await this.requireActiveRound(roomCode);
     const player = await this.getPlayerFromRoom(roomCode, playerId);
-    const blackCard = await this.blackCardDeck.findBlackCard(roomCode, round.blackCardId);
-    assertPlayableCards({ round, player, playedCardIds, pick: blackCard?.pick ?? 1 });
+    const blackCard = await this.blackCardDeck.findBlackCard(
+      roomCode,
+      round.blackCardId
+    );
+    assertPlayableCards({
+      round,
+      player,
+      playedCardIds,
+      pick: blackCard?.pick ?? 1
+    });
 
     await this.roundPlayedCardsRepository.create({
       playerId: player.id,
@@ -471,7 +509,10 @@ export class RoomService implements IRoomService {
     });
 
     const cardsDrawn = await this.refillHand(roomCode, player, playedCardIds);
-    return { player: await this.getPlayerFromRoom(roomCode, playerId), cardsDrawn };
+    return {
+      player: await this.getPlayerFromRoom(roomCode, playerId),
+      cardsDrawn
+    };
   }
 
   // Refill exactly the cards just played so the Hand tops back up to its
@@ -518,7 +559,8 @@ export class RoomService implements IRoomService {
       await this.roomPlayersRepository.setPlayersAsUnready(roomCode);
     } catch (error) {
       throw new InternalServerError(
-        'Erro ao definir jogadores como não prontos.'
+        'Erro ao definir jogadores como não prontos.',
+        { cause: error }
       );
     }
   }
@@ -540,8 +582,8 @@ export class RoomService implements IRoomService {
       });
 
       return round;
-    } catch (e) {
-      throw new InternalServerError('Erro ao criar rodada.');
+    } catch (error) {
+      throw new InternalServerError('Erro ao criar rodada.', { cause: error });
     }
   }
 
@@ -569,13 +611,18 @@ export class RoomService implements IRoomService {
   // Everything a (re)connecting client needs to render the current Round, since
   // WS events are only live deltas. Played Cards are hidden until judging, when
   // `room.time-to-judge` reveals them to the whole Room anyway.
-  public async getRoundSnapshot(roomCode: string): Promise<RoundSnapshot | null> {
+  public async getRoundSnapshot(
+    roomCode: string
+  ): Promise<RoundSnapshot | null> {
     const round = await this.getActiveRound(roomCode);
     if (!round) {
       return null;
     }
 
-    const blackCard = await this.blackCardDeck.findBlackCard(roomCode, round.blackCardId);
+    const blackCard = await this.blackCardDeck.findBlackCard(
+      roomCode,
+      round.blackCardId
+    );
     const revealed = round.status === 'JUDGING' || round.status === 'COMPLETE';
     const roundPlayedCards = revealed
       ? await this.getRoundPlayedCards(roomCode, round.roundNumber)
@@ -608,7 +655,8 @@ export class RoomService implements IRoomService {
     const room = await this.getRoom(roomCode);
     this.assertCanRotate(room, currentRound);
 
-    const players = await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+    const players =
+      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
     // Exclude the Judge who just judged (room.judgeId). Excluding prevJudgeId
     // let the same Player judge twice in a row.
     const nextJudgeId = getRandomJudge(room.judgeId, players);
@@ -631,7 +679,14 @@ export class RoomService implements IRoomService {
     });
 
     const judge = await this.getPlayerFromRoom(roomCode, nextJudgeId);
-    return { ...nextRound, room: updatedRoom, judge, roundWinner: null, roundPlayedCards: [], blackCard };
+    return {
+      ...nextRound,
+      room: updatedRoom,
+      judge,
+      roundWinner: null,
+      roundPlayedCards: [],
+      blackCard
+    };
   }
 
   private assertCanRotate(room: Room, currentRound: number): void {
@@ -667,7 +722,11 @@ export class RoomService implements IRoomService {
     const winner = await this.findWinningPlay(round, winnerPlayerId);
     await this.claimJudgedRound(round, winner);
 
-    await this.incrementPlayerScore({ roomCode, playerId: winnerPlayerId, by: 1 });
+    await this.incrementPlayerScore({
+      roomCode,
+      playerId: winnerPlayerId,
+      by: 1
+    });
     const winnerPlayer = await this.getPlayerFromRoom(roomCode, winnerPlayerId);
 
     // Win-condition branch: reaching maxPoints ends the game instead of dealing
@@ -688,9 +747,15 @@ export class RoomService implements IRoomService {
       );
     }
 
-    const plays = await this.getRoundPlayedCards(round.roomCode, round.roundNumber);
+    const plays = await this.getRoundPlayedCards(
+      round.roomCode,
+      round.roundNumber
+    );
     const winner = plays.find(play => play.player.id === winnerPlayerId);
-    const stillInRoom = await this.roomPlayersRepository.getPlayerFromRoom(round.roomCode, winnerPlayerId);
+    const stillInRoom = await this.roomPlayersRepository.getPlayerFromRoom(
+      round.roomCode,
+      winnerPlayerId
+    );
     if (!winner || !stillInRoom) {
       throw new BadRequestError(
         `O jogador ${winnerPlayerId} não tem jogada válida na rodada ${round.roundNumber}.`
@@ -699,8 +764,15 @@ export class RoomService implements IRoomService {
     return winner;
   }
 
-  private async claimJudgedRound(round: Round, winner: RoundPlayedCard): Promise<void> {
-    const claimed = await this.roundsRepository.claimAdvance(round.id, 'JUDGING', 'COMPLETE');
+  private async claimJudgedRound(
+    round: Round,
+    winner: RoundPlayedCard
+  ): Promise<void> {
+    const claimed = await this.roundsRepository.claimAdvance(
+      round.id,
+      'JUDGING',
+      'COMPLETE'
+    );
     if (!claimed) {
       throw new BadRequestError(
         `A rodada ${round.roundNumber} já foi decidida.`

@@ -1,4 +1,5 @@
 import type { App } from '@/app';
+import { UnauthorizedError } from '@/errors';
 import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 import { z } from 'zod';
 
@@ -22,9 +23,14 @@ export const signOutController = async (app: App) => {
 
         const cookie = await authService.signOut(session.id);
         res.setCookie(cookie.name, cookie.value, cookie.attributes);
+        req.log.info(
+          { event: 'auth.signed_out', userId: session.userId },
+          'User signed out'
+        );
 
         return res.status(204).send();
-      } catch {
+      } catch (err) {
+        if (!(err instanceof UnauthorizedError)) throw err;
         return res.status(204).send();
       }
     }

@@ -46,6 +46,10 @@ export const signInWithGithub = async (app: App) => {
       const storedState = req.cookies.github_oauth_state ?? null;
 
       if (!code || !state || !storedState || state !== storedState) {
+        req.log.warn(
+          { event: 'auth.oauth_state_rejected', provider: 'github' },
+          'OAuth state rejected'
+        );
         throw new BadRequestError('Invalid state');
       }
 
@@ -54,6 +58,10 @@ export const signInWithGithub = async (app: App) => {
       });
 
       res.setCookie(cookie.name, cookie.value, cookie.attributes);
+      req.log.info(
+        { event: 'auth.signed_in', provider: 'github' },
+        'OAuth sign-in completed'
+      );
 
       return res.redirect(redirectUrl);
     }

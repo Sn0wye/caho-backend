@@ -57,12 +57,10 @@ export const signInWithGoogle = async (app: App) => {
         !storedCodeVerifier ||
         state !== storedState
       ) {
-        console.log({
-          code: !code,
-          storedState: !storedState,
-          storedCodeVerifier: !storedCodeVerifier,
-          state: state !== storedState
-        });
+        req.log.warn(
+          { event: 'auth.oauth_state_rejected', provider: 'google' },
+          'OAuth state rejected'
+        );
 
         throw new BadRequestError('Invalid state');
       }
@@ -73,6 +71,10 @@ export const signInWithGoogle = async (app: App) => {
       });
 
       res.setCookie(cookie.name, cookie.value, cookie.attributes);
+      req.log.info(
+        { event: 'auth.signed_in', provider: 'google' },
+        'OAuth sign-in completed'
+      );
 
       return res.redirect(redirectUrl);
     }

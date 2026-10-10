@@ -1,4 +1,3 @@
-import { db } from '@/db';
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -30,7 +29,7 @@ export const checkRoutes = async (app: FastifyInstance) => {
         }
       }
     },
-    async (_req, res) => {
+    async (req, res) => {
       const healthStatus = {
         http: true,
         db: true,
@@ -38,38 +37,28 @@ export const checkRoutes = async (app: FastifyInstance) => {
       };
 
       try {
-        try {
-          await db.execute(sql`SELECT 1`);
-        } catch (dbError) {
-          console.log(dbError);
-          healthStatus.db = false;
-        }
-
-        try {
-          await app.redis.ping();
-        } catch (redisError) {
-          healthStatus.redis = false;
-        }
-
-        // If all services are okay
-        if (healthStatus.db && healthStatus.redis) {
-          return res.send({
-            message: 'ok',
-            services: healthStatus
-          });
-        }
-
-        return res.status(503).send({
-          message: 'Service Unavailable',
-          services: healthStatus
-        });
+        await app.db.execute(sql`SELECT 1`);
       } catch (err) {
-        // In case any unhandled error happens
-        return res.status(503).send({
-          message: 'Service Unavailable',
-          services: healthStatus
-        });
+        req.log.error(
+          { event: 'health.dependency_failed', dependency: 'postgres', err },
+          'Readiness dependency failed'
+        );
+        healthStatus.db = false;
       }
+      try {
+        await app.redis.ping();
+      } catch (err) {
+        req.log.error(
+          { event: 'health.dependency_failed', dependency: 'redis', err },
+          'Readiness dependency failed'
+        );
+        healthStatus.redis = false;
+      }
+      const ready = healthStatus.db && healthStatus.redis;
+      return res.status(ready ? 200 : 503).send({
+        message: ready ? 'ok' : 'Service Unavailable',
+        services: healthStatus
+      });
     }
   );
 };

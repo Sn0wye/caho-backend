@@ -22,17 +22,19 @@ import {
 } from 'fastify-type-provider-zod';
 import { db } from './db';
 import { fastifyErrorHandler } from './http/error-handler';
-import { logger, seqStream } from './lib/logger';
 import { authRoutes } from './http/routes/auth';
+import { checkRoutes } from './http/routes/checks';
 import { pingRoute } from './http/routes/ping';
 import { roomRoutes } from './http/routes/room';
 import { wsRoutes } from './http/routes/ws';
+import { logger } from './lib/logger';
 import { Pubsub } from './lib/pub-sub';
+import { installHttpObservability } from './observability/http-observability';
+import { traceBackground } from './observability/operations';
 import { authPlugin } from './plugins/auth';
-import { checkRoutes } from './http/routes/checks';
 import { RoundTimekeeperFactory } from './services/round/RoundTimekeeperFactory';
-import { subscribeRoundExpiry } from './services/round/subscribeRoundExpiry';
 import { ensureExpiryNotifications } from './services/round/ensureExpiryNotifications';
+import { subscribeRoundExpiry } from './services/round/subscribeRoundExpiry';
 
 // import { csrfPlugin } from './plugins/csrf';
 
@@ -44,9 +46,14 @@ export type App = FastifyInstance<
   ZodTypeProvider
 >;
 
-export const app = fastify({
-  logger
+export const app: App = fastify({
+  logger: logger as FastifyBaseLogger,
+  disableRequestLogging: true,
+  // Do not accept arbitrary client request IDs as log properties.
+  requestIdHeader: false
 }).withTypeProvider<ZodTypeProvider>();
+
+installHttpObservability(app);
 
 // Round timer engine (ADR-0003 / issue #4): on boot, sweep any Round whose
 // deadline lapsed while the process was down, then subscribe to Redis expired-key
@@ -56,15 +63,19 @@ let unsubscribeRoundExpiry: (() => Promise<void>) | null = null;
 if (env.NODE_ENV !== 'test') {
   app.addHook('onReady', async () => {
     const timekeeper = RoundTimekeeperFactory();
-    await ensureExpiryNotifications(redis);
-    await timekeeper.reconcile();
-    unsubscribeRoundExpiry = await subscribeRoundExpiry(redis, timekeeper);
+    await ensureExpiryNotifications(redis, logger);
+    await traceBackground('round.reconcile', {}, () => timekeeper.reconcile());
+    unsubscribeRoundExpiry = await subscribeRoundExpiry(
+      redis,
+      timekeeper,
+      logger,
+      redis.options.db ?? 0
+    );
   });
 }
 
 app.addHook('onClose', async () => {
   await unsubscribeRoundExpiry?.();
-  await seqStream?.flush();
 });
 
 app.setValidatorCompiler(validatorCompiler);
@@ -106,7 +117,7 @@ app.register(fastifySwaggerUi, {
 // decorators
 app.decorate('db', db);
 app.decorate('redis', redis);
-app.decorate('pubsub', new Pubsub(redis));
+app.decorate('pubsub', new Pubsub(redis, logger));
 
 // plugins
 app.register(fastifyCors, {

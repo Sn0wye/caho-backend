@@ -176,10 +176,12 @@ export class AuthService {
       };
     } catch (e) {
       if (e instanceof OAuth2RequestError || e instanceof ArcticFetchError) {
-        throw new BadRequestError('Invalid code');
+        throw new BadRequestError('Invalid code', { cause: e });
       }
 
-      throw new InternalServerError('Failed to sign in with GitHub');
+      throw new InternalServerError('Failed to sign in with GitHub', {
+        cause: e
+      });
     }
   }
 
@@ -256,10 +258,12 @@ export class AuthService {
       };
     } catch (e) {
       if (e instanceof OAuth2RequestError || e instanceof ArcticFetchError) {
-        throw new BadRequestError('Invalid code');
+        throw new BadRequestError('Invalid code', { cause: e });
       }
 
-      throw new InternalServerError('Failed to sign in with Google');
+      throw new InternalServerError('Failed to sign in with Google', {
+        cause: e
+      });
     }
   }
 

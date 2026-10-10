@@ -3,7 +3,8 @@ import { basePack } from '@/cards/base-pack';
 import { drizzleSeedStore } from '@/cards/drizzleSeedStore';
 import { seedCardPack } from '@/cards/seedCardPack';
 import { db } from '@/db';
-import { logger } from '@/lib/logger';
+import { postgresPool } from '@/db';
+import { logger, seqStream } from '@/lib/logger';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 // One-shot database setup for deploys: apply pending migrations, then seed the
@@ -19,15 +20,27 @@ async function setupDatabase(): Promise<void> {
     migrationsTable: 'migrations',
     migrationsSchema: 'public'
   });
-  logger.info({ step: 'migrate' }, 'migrations applied');
+  logger.info(
+    { event: 'database.migrated', step: 'migrate' },
+    'migrations applied'
+  );
 
   await seedCardPack(drizzleSeedStore, basePack);
-  logger.info({ step: 'seed', pack: basePack.id }, 'card pack seeded');
+  logger.info(
+    { event: 'database.seeded', step: 'seed', pack: basePack.id },
+    'card pack seeded'
+  );
 }
 
 setupDatabase()
-  .then(() => process.exit(0))
-  .catch(error => {
-    logger.error({ error }, 'database setup failed');
-    process.exit(1);
+  .catch(err => {
+    logger.error(
+      { event: 'database.setup_failed', err },
+      'database setup failed'
+    );
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await postgresPool.end();
+    await seqStream?.flush();
   });

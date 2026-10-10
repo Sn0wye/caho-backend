@@ -1,8 +1,8 @@
 import type { App } from '@/app';
-import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { createRoom } from '@/contracts';
+import { ensureAuth } from '@/plugins/ensure-auth';
 import type { Player } from '@/schemas';
+import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 
 export const createRoomController = async (app: App) => {
   const roomService = RoomServiceFactory();
@@ -42,6 +42,10 @@ export const createRoomController = async (app: App) => {
         roomCode: room.code,
         player: host
       });
+      req.log.info(
+        { event: 'room.created', roomCode: room.code, userId: host.id },
+        'Room created'
+      );
 
       res.status(201);
       return room;

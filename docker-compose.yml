@@ -93,6 +93,11 @@ services:
     environment:
       SEQ_URL: ${SEQ_URL:-}
       SEQ_API_KEY: ${SEQ_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-caho-backend}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
     ports:
       - "8080:8080"
     networks:

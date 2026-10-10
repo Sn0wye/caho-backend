@@ -1,5 +1,5 @@
 import type { Redis } from 'ioredis';
-import { logger } from '@/lib/logger';
+import type { Logger } from 'pino';
 
 const SETTING = 'notify-keyspace-events';
 
@@ -16,7 +16,10 @@ export const withExpiredKeyEvents = (flags: string): string => {
 // Redis ships with keyspace events off, and the compose file never enabled them,
 // so no Round timer ever fired (ADR-0003). Turn them on at boot; a managed Redis
 // may forbid CONFIG, in which case the server config must set it.
-export async function ensureExpiryNotifications(redis: Redis): Promise<void> {
+export async function ensureExpiryNotifications(
+  redis: Redis,
+  log: Logger
+): Promise<void> {
   try {
     const [, current = ''] = (await redis.config('GET', SETTING)) as string[];
     const wanted = withExpiredKeyEvents(current);
@@ -24,8 +27,13 @@ export async function ensureExpiryNotifications(redis: Redis): Promise<void> {
       await redis.config('SET', SETTING, wanted);
     }
   } catch (error) {
-    logger.warn(
-      { error, setting: SETTING, expected: 'Ex' },
+    log.warn(
+      {
+        err: error,
+        event: 'round.expiry_configuration_failed',
+        setting: SETTING,
+        expected: 'Ex'
+      },
       'could not enable Redis expired-key events; Round timers will not fire'
     );
   }

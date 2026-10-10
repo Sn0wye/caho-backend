@@ -1,4 +1,5 @@
 import { redis } from '@/db/redis';
+import { logger } from '@/lib/logger';
 import { Pubsub } from '@/lib/pub-sub';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
 import { RoundFlow } from './RoundFlow';
@@ -11,6 +12,7 @@ export function RoundFlowFactory(): RoundFlow {
   return new RoundFlow(
     RoomServiceFactory(),
     RoundTimekeeperFactory(),
-    new Pubsub(redis)
+    new Pubsub(redis, logger),
+    logger
   );
 }
