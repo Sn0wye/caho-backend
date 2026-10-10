@@ -18,5 +18,9 @@ export const env = createEnv({
     SEQ_URL: z.string().url().optional(),
     SEQ_API_KEY: z.string().min(1).optional()
   },
-  runtimeEnv: process.env
+  runtimeEnv: {
+    ...process.env,
+    SEQ_URL: process.env.SEQ_URL || undefined,
+    SEQ_API_KEY: process.env.SEQ_API_KEY || undefined
+  }
 });

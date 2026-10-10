@@ -79,23 +79,24 @@ in with passwords. Configure callback URLs in both OAuth providers. Production
 CORS currently permits `https://caho.com.br`; another frontend domain requires
 updating `src/app.ts` before deployment.
 
-`SEQ_URL` is optional. Omit it when Seq is unused; an empty value fails URL
-validation. For an authenticated shared Seq server, also set `SEQ_API_KEY`.
-Use its private ingestion URL, `http://<seq-host>:5341`, and a dedicated
-**Ingest-only** key for CAHO production. Attach `Application=caho`,
-`Service=caho-backend`, and `Environment=production` to that key in Seq.
-Enable authenticated HTTP ingestion. Never give the application an admin key
-or permission to read other projects' logs. A saved signal matching
-`Application = 'caho' and Environment = 'production'` separates CAHO logs.
+`SEQ_URL` is optional. Omit it or leave it empty to disable Seq; development
+needs no Seq server or credentials. Set `SEQ_API_KEY` only when the chosen
+server requires authentication. PostgreSQL, Redis, and Seq are separate
+resources, not part of the CAHO image.
 
-Keep Redis and Seq under Coolify's Shared Resources project, reachable through
-the private Docker network. Pin each image to a tested version and digest.
-CAHO currently needs Redis database 0, keys matching `round:*`, room/player
-Pub/Sub channels, and the `__keyevent@0__:expired` subscription. A dedicated
-Redis instance and user avoid sharing its unprefixed channels with other apps.
-Set expiry notifications in server configuration so CAHO does not need
-`CONFIG SET`. PostgreSQL, Redis, and Seq are separate resources, not part of
-the CAHO image.
+Redis deadline keys use `caho:round:<round-id>:play` and
+`caho:round:<round-id>:judge`. Room and player Pub/Sub channels also start
+with `caho:`; WebSocket clients still use the same room codes and player IDs.
+An ACL can restrict key access to `~caho:*` and application channels to
+`&caho:*`. Also permit the Redis-owned `&__keyevent@0__:expired` channel:
+Redis broadcasts expiry events for the database, and CAHO ignores foreign keys.
+Configure `notify-keyspace-events Ex` on the server to avoid granting the
+application `CONFIG SET`.
+
+Deploy this prefix change with all API instances together, because the prior
+version uses different keys and channels. Persisted PostgreSQL deadlines
+remain the startup reconciliation backstop; legacy unprefixed timer keys
+expire naturally and are ignored by the new version.
 
 ## GitHub secrets and first deployment
 
@@ -116,6 +117,12 @@ To roll back, set the Coolify image tag to an earlier full commit SHA and
 redeploy. Restore `latest` to resume automatic image updates.
 
 ## Local verification
+
+The default Compose stack starts without Seq. To opt into local Seq logging:
+
+```sh
+SEQ_URL=http://seq:5341 docker compose --profile observability up -d
+```
 
 ```sh
 rtk pnpm install --frozen-lockfile
