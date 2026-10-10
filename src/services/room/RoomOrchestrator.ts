@@ -130,8 +130,20 @@ export class RoomOrchestrator {
       return;
     }
 
-    await this.broadcastHostDeparture(roomCode, playerId);
+    await this.handleHostDrop(roomCode, playerId);
     await this.handleJudgeDeparture(roomCode, playerId, 'drop');
+  }
+
+  // A dropped socket is not a Leave (ADR-0002). In LOBBY there is no game to keep
+  // alive, so a Host refresh (or React StrictMode's mount/unmount/mount in dev)
+  // used to end the Room for everyone. Keep the Host; they stay Inactive until
+  // they reconnect. IN_PROGRESS still hands Host to an active Player (issue #3).
+  private async handleHostDrop(roomCode: string, playerId: string): Promise<void> {
+    const room = await this.rooms.getRoom(roomCode);
+    if (room.status === 'LOBBY') {
+      return;
+    }
+    await this.broadcastHostDeparture(roomCode, playerId);
   }
 
   // A reconnecting Judge resumes their held Round instead of having it aborted

@@ -47,6 +47,7 @@ export class FakeRoomOrchestratorService implements IRoomOrchestratorService {
   public readonly joined: JoinRoomDTO[] = [];
   public readonly left: LeaveRoomDTO[] = [];
   public readonly endGameCalls: string[] = [];
+  public readonly hostLossCalls: string[] = [];
   public readonly setActiveCalls: Array<{
     roomCode: string;
     playerId: string;
@@ -94,7 +95,8 @@ export class FakeRoomOrchestratorService implements IRoomOrchestratorService {
     return this.require('ranking');
   }
 
-  async handleHostLoss(): Promise<HostLossOutcome> {
+  async handleHostLoss(_roomCode: string, playerId: string): Promise<HostLossOutcome> {
+    this.hostLossCalls.push(playerId);
     return this.require('hostLoss');
   }
 

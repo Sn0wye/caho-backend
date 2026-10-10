@@ -295,6 +295,41 @@ describe('RoomOrchestrator.markPresence', () => {
     expect(clock.gracedRoundIds).toEqual([round.id]);
     expect(clock.expiredRoundIds).toHaveLength(0);
   });
+
+  // Regression: a Host refresh in LOBBY closed the socket and ended the Room.
+  it('keeps the Room and its Host when the Host drops in LOBBY', async () => {
+    const { orchestrator, rooms, publisher } = build({
+      presencePlayer: makePlayer({ id: HOST_ID, isHost: true }),
+      room: makeRoom({ status: 'LOBBY', judgeId: null }),
+      hostLoss: { kind: 'room-ended', ranking: [] }
+    });
+
+    await orchestrator.markPresence(ROOM_CODE, HOST_ID, false);
+
+    expect(rooms.hostLossCalls).toHaveLength(0);
+    expect(publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer({ id: HOST_ID, isHost: true, isActive: false })
+        }
+      }
+    ]);
+  });
+
+  it('still hands Host over when the Host drops IN_PROGRESS', async () => {
+    const newHost = makePlayer({ id: 'player-a', isHost: true });
+    const { orchestrator, rooms } = build({
+      presencePlayer: makePlayer({ id: HOST_ID, isHost: true }),
+      room: makeRoom(),
+      hostLoss: { kind: 'host-reassigned', newHost }
+    });
+
+    await orchestrator.markPresence(ROOM_CODE, HOST_ID, false);
+
+    expect(rooms.hostLossCalls).toEqual([HOST_ID]);
+  });
 });
 
 describe('RoomOrchestrator.endRoom', () => {

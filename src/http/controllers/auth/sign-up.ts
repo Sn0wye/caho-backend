@@ -23,7 +23,7 @@ export const signUpController = async (app: App) => {
       const { username, password } = req.body;
       const { cookie, user } = await authService.signUp(username, password);
 
-      res.setCookie(cookie.name, cookie.value);
+      res.setCookie(cookie.name, cookie.value, cookie.attributes);
 
       return {
         ...user,
