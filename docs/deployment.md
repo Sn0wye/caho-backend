@@ -63,5 +63,4 @@ logging. Export failures write to stdout. Shutdown drains connections and export
 buffers, with a ten-second deadline.
 
 Verify a request log opens its trace in Seq. Measure daily storage growth before
-choosing retention or reducing sampling. See the [logging audit](logging-audit.md)
-for remaining actions and incident filters.
+choosing retention or reducing sampling.
