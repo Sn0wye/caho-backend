@@ -23,7 +23,6 @@ import type { IUserRepository } from '@/repositories/user/IUserRepository';
 import type { SessionService } from '@/services/auth/SessionService';
 import { hash, verify } from '@/utils/password';
 import { createId } from '@paralleldrive/cuid2';
-import { eq } from 'drizzle-orm';
 import {
   ArcticFetchError,
   generateCodeVerifier,
@@ -277,9 +276,8 @@ export class AuthService {
         )
     });
 
-    const userId = existingAccount
-      ? await this.backfillOAuthUser(existingAccount.userId, profile)
-      : await this.createOAuthUser(profile);
+    const userId =
+      existingAccount?.userId ?? (await this.createOAuthUser(profile));
 
     return this.issueSession(userId);
   }
@@ -304,30 +302,6 @@ export class AuthService {
         userId
       });
     });
-
-    return userId;
-  }
-
-  // Google users created before this fix have an empty username, and GitHub
-  // users never got an email. Fill those in on their next sign-in without
-  // touching anything the user already set.
-  private async backfillOAuthUser(userId: string, profile: OAuthProfile) {
-    const user = await db.query.users.findFirst({
-      where: (users, { eq }) => eq(users.id, userId)
-    });
-
-    if (!user || (user.username && user.email)) {
-      return userId;
-    }
-
-    await db
-      .update(users)
-      .set({
-        username:
-          user.username || (await this.claimFreeUsername(profile.username)),
-        email: user.email ?? profile.email
-      })
-      .where(eq(users.id, userId));
 
     return userId;
   }
