@@ -8,7 +8,8 @@ type SeqStream = ReturnType<typeof createStream>;
 export function buildLogger(
   seqUrl?: string,
   production: boolean = false,
-  consoleOutput: NodeJS.WritableStream = process.stdout
+  consoleOutput: NodeJS.WritableStream = process.stdout,
+  seqApiKey?: string
 ): {
   logger: pino.Logger;
   seqStream: SeqStream | null;
@@ -17,7 +18,9 @@ export function buildLogger(
   const consoleStream = production
     ? consoleOutput
     : pino.transport({ target: '@fastify/one-line-logger' });
-  const seqStream = seqUrl ? createStream({ serverUrl: seqUrl }) : null;
+  const seqStream = seqUrl
+    ? createStream({ serverUrl: seqUrl, apiKey: seqApiKey })
+    : null;
   const streams: pino.StreamEntry[] = [{ stream: consoleStream }];
   // pino-seq stream is Writable-compatible; cast needed for type alignment
   if (seqStream)
@@ -30,5 +33,7 @@ export function buildLogger(
 
 export const { logger, seqStream } = buildLogger(
   env.SEQ_URL,
-  env.NODE_ENV === 'production'
+  env.NODE_ENV === 'production',
+  process.stdout,
+  env.SEQ_API_KEY
 );

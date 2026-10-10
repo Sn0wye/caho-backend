@@ -1,21 +1,38 @@
-import { Writable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import type { PinoSeqStreamConfig } from 'pino-seq';
+import { describe, expect, it, vi } from 'vitest';
 import { buildLogger } from './logger';
+import { FakeConsoleOutput, FakeSeqOutput } from './logger.fakes';
 
-class FakeConsoleOutput extends Writable {
-  readonly lines: string[] = [];
-
-  override _write(
-    chunk: Buffer,
-    _encoding: BufferEncoding,
-    callback: (error?: Error | null) => void
-  ): void {
-    this.lines.push(chunk.toString());
-    callback();
-  }
-}
+vi.mock('pino-seq', async () => {
+  const { FakeSeqOutput } = await import('./logger.fakes');
+  return {
+    createStream: vi.fn(
+      (config: PinoSeqStreamConfig) => new FakeSeqOutput(config)
+    )
+  };
+});
 
 describe('production logger', () => {
+  it('ships logs with the configured API key without logging that secret', () => {
+    const consoleOutput = new FakeConsoleOutput();
+    const { logger, seqStream } = buildLogger(
+      'http://seq:5341',
+      true,
+      consoleOutput,
+      'caho-ingest-test-key'
+    );
+    expect(seqStream).toBeInstanceOf(FakeSeqOutput);
+    if (!(seqStream instanceof FakeSeqOutput))
+      throw new Error('Expected FakeSeqOutput');
+    expect(seqStream.config).toMatchObject({
+      serverUrl: 'http://seq:5341',
+      apiKey: 'caho-ingest-test-key'
+    });
+    logger.info({ roomCode: 'ABC123' }, 'round started');
+    expect(seqStream.lines).toHaveLength(1);
+    expect(consoleOutput.lines.join('')).not.toContain('caho-ingest-test-key');
+  });
+
   it('writes structured JSON directly to the supplied console stream', () => {
     const consoleOutput = new FakeConsoleOutput();
     const { logger, seqStream } = buildLogger(undefined, true, consoleOutput);
