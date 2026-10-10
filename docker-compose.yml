@@ -11,7 +11,9 @@ services:
       - '6379:6379'
     environment:
       REDIS_PASSWORD: caho
-    command: ['redis-server', '--requirepass', 'caho']
+    # Expired-key events drive the Round timers (ADR-0003).
+    command:
+      ['redis-server', '--requirepass', 'caho', '--notify-keyspace-events', 'Ex']
     networks:
       - caho
     healthcheck:
@@ -54,8 +56,26 @@ services:
     networks:
       - caho
 
+  # One-shot: apply migrations + seed the base card pack, then exit. The API
+  # waits for it so it never boots against an empty schema or card pool.
+  caho-migrate:
+    container_name: caho-migrate
+    image: caho-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ['node', 'dist/migrate.js']
+    restart: 'no'
+    env_file: ./.env.docker
+    networks:
+      - caho
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   caho-api:
     container_name: caho-api
+    image: caho-api:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -68,9 +88,14 @@ services:
     networks:
       - caho
     depends_on:
-      - postgres
-      - redis
-      - seq
+      caho-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seq:
+        condition: service_started
 
 volumes:
   postgres_data:

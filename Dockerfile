@@ -22,6 +22,8 @@ RUN apk add --no-cache curl
 EXPOSE 8080
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+# Read at runtime by dist/migrate.js (the caho-migrate compose service).
+COPY migrations ./migrations
 COPY package.json ./
 USER node
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

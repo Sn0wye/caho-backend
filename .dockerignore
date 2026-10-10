@@ -8,7 +8,6 @@ dist
 .github/
 .opencode/
 .agents/
-migrations/
 scripts/
 drizzle.config.ts
 vitest*
