@@ -4,31 +4,31 @@ import { env } from '@/env';
 
 type SeqStream = ReturnType<typeof createStream>;
 
-export function buildLogger(seqUrl?: string): {
+/** Create console logging and optional Seq shipping. Example: buildLogger(undefined, true). */
+export function buildLogger(
+  seqUrl?: string,
+  production: boolean = false,
+  consoleOutput: NodeJS.WritableStream = process.stdout
+): {
   logger: pino.Logger;
   seqStream: SeqStream | null;
 } {
-  const consoleTransport = pino.transport({
-    target: '@fastify/one-line-logger'
-  });
-
-  if (seqUrl) {
-    const seqStream = createStream({ serverUrl: seqUrl });
-    const logger = pino(
-      { level: 'info' },
-      pino.multistream([
-        { stream: consoleTransport },
-        // pino-seq stream is Writable-compatible; cast needed for type alignment
-        { stream: seqStream as unknown as NodeJS.WritableStream }
-      ])
-    );
-    return { logger, seqStream };
-  }
-
+  // Production writes JSON directly, avoiding a worker just to format log lines.
+  const consoleStream = production
+    ? consoleOutput
+    : pino.transport({ target: '@fastify/one-line-logger' });
+  const seqStream = seqUrl ? createStream({ serverUrl: seqUrl }) : null;
+  const streams: pino.StreamEntry[] = [{ stream: consoleStream }];
+  // pino-seq stream is Writable-compatible; cast needed for type alignment
+  if (seqStream)
+    streams.push({ stream: seqStream as unknown as NodeJS.WritableStream });
   return {
-    logger: pino({ level: 'info' }, consoleTransport),
-    seqStream: null
+    logger: pino({ level: 'info' }, pino.multistream(streams)),
+    seqStream
   };
 }
 
-export const { logger, seqStream } = buildLogger(env.SEQ_URL);
+export const { logger, seqStream } = buildLogger(
+  env.SEQ_URL,
+  env.NODE_ENV === 'production'
+);

@@ -3,6 +3,8 @@ dist
 .git
 .gitignore
 .env*
+# Committed dummy credentials used only by the builder's test suite.
+!.env.test
 .DS_Store
 *.md
 .github/
@@ -10,5 +12,8 @@ dist
 .agents/
 scripts/
 drizzle.config.ts
-vitest*
 test.html
+docs/
+docker/
+coverage/
+*.log
