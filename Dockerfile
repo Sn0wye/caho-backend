@@ -19,12 +19,9 @@ RUN rm -rf node_modules && pnpm install --offline --frozen-lockfile --prod
 FROM dependencies AS builder
 COPY package.json ./
 RUN pnpm install --offline --frozen-lockfile
-COPY tsconfig.json tsup.config.ts vitest.config.ts vitest.setup.ts .env.test ./
+COPY tsconfig.json tsup.config.ts ./
 COPY src ./src
-# Tests and build share one ARM64 install; failed checks cannot publish an image.
-RUN pnpm exec dotenv -e .env.test -- vitest run \
-  && pnpm typecheck \
-  && pnpm run build
+RUN pnpm run build
 
 FROM node:24.15.0-alpine AS runner
 WORKDIR /app

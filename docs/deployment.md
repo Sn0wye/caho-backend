@@ -1,11 +1,18 @@
 # Docker and Coolify deployment
 
 The GitHub Actions workflow follows the Splitty and CloudCertify pipeline:
-Docker runs tests, type checking, and compilation on a native ARM64 runner,
+pull requests targeting `main` run tests and type checking in **PR Checks**.
+After merge, a native ARM64 Docker build compiles and packages the API,
 GitHub Container Registry receives the image, and an authenticated webhook
-queues a Coolify deployment.
+queues a Coolify deployment. Docker builds do not run tests or type checking.
 Pushes to `main` that change build inputs trigger it. You can also run the
 workflow manually on `main`.
+
+Make **Tests and types** a required check in the `main` branch rules to prevent
+merging a pull request with failing tests. The PR workflow runs on every pull
+request targeting `main`, including documentation-only changes, so the required
+check is never skipped by path filters. Direct pushes to `main` do not run these
+PR checks.
 
 Published images:
 
@@ -98,6 +105,7 @@ redeploy. Restore `latest` to resume automatic image updates.
 ```sh
 rtk pnpm install --frozen-lockfile
 rtk pnpm exec dotenv -e .env.test -- vitest run
+rtk pnpm typecheck
 rtk docker build --platform linux/arm64 -t caho-api:local .
 rtk docker compose up -d
 rtk proxy curl --fail http://localhost:8080/ping
@@ -118,14 +126,19 @@ files are excluded from the final image. TypeScript remains a declared peer of
 the environment library. The health check uses Alpine's existing BusyBox
 `wget`, so curl and its extra packages are unnecessary.
 
-CI uses `ubuntu-24.04-arm` and builds only `linux/arm64`, with no QEMU. Tests and
-compilation share the builder's dependency install. `pnpm fetch` is a normal
+CI uses `ubuntu-24.04-arm` and builds only `linux/arm64`, with no QEMU. PR checks
+cache the pnpm store and run tests and `tsc --noEmit` before merge. The separate
+publication workflow builds the image without repeating these checks.
+`pnpm fetch` is a normal
 cached layer keyed by the lockfile and workspace settings; both installs run
 offline afterward. This survives GitHub's ephemeral runners, where BuildKit
 cache mounts are not exported by the standard GitHub Actions cache. The cache
-has an explicit ARM64 scope. Source changes rerun checks and compilation;
+has an explicit ARM64 scope. Source changes rerun compilation;
 migration-only changes reuse the compiled application. Declaration generation
-is disabled for this private server, with `tsc --noEmit` checking types instead.
+is disabled for this private server, with PR CI checking types instead.
+Test files and `.env.test` are excluded from the Docker build context. Changes
+only to test specs, Vitest configuration, or `.env.test` do not trigger image
+publication.
 
 Local ARM64 verification on 2026-10-10 found:
 
