@@ -4,6 +4,8 @@ import type { BlackCard } from '@/schemas';
 // RoomService.startNextRound returns a richer shape that structurally satisfies
 // this. See issue #4.
 export type RoundRotation = {
+  // The new Round's id, so the timer engine can arm its play deadline.
+  id: string;
   roundNumber: number;
   // The Judge for the new Round — carried into room.round-start so the frontend
   // can move the Judge without a refetch. RoomService.startNextRound sets this on

@@ -32,6 +32,7 @@ import { authPlugin } from './plugins/auth';
 import { checkRoutes } from './http/routes/checks';
 import { RoundTimekeeperFactory } from './services/round/RoundTimekeeperFactory';
 import { subscribeRoundExpiry } from './services/round/subscribeRoundExpiry';
+import { ensureExpiryNotifications } from './services/round/ensureExpiryNotifications';
 
 // import { csrfPlugin } from './plugins/csrf';
 
@@ -55,6 +56,7 @@ let unsubscribeRoundExpiry: (() => Promise<void>) | null = null;
 if (env.NODE_ENV !== 'test') {
   app.addHook('onReady', async () => {
     const timekeeper = RoundTimekeeperFactory();
+    await ensureExpiryNotifications(redis);
     await timekeeper.reconcile();
     unsubscribeRoundExpiry = await subscribeRoundExpiry(redis, timekeeper);
   });

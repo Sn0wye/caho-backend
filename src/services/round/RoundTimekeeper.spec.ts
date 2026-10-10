@@ -36,10 +36,7 @@ function makePlayedCard(playerId: string): RoundPlayedCard {
     roundId: ROUND_ID,
     player: {
       id: playerId,
-      name: playerId,
-      email: null,
       username: playerId,
-      password: 'x',
       avatarUrl: null
     },
     whiteCards: [],
@@ -74,7 +71,7 @@ function buildTimekeeper(args: {
     fakes.playedCards,
     fakes.rotator,
     fakes.publisher,
-    { playWindowSeconds: 60, judgeGraceSeconds: 30 }
+    { playWindowSeconds: 60, judgeGraceSeconds: 30, judgeWindowSeconds: 90 }
   );
 
   return { timekeeper, fakes };
@@ -369,5 +366,54 @@ describe('parseDeadlineKey', () => {
       kind: 'judge'
     });
     expect(parseDeadlineKey('session:xyz')).toBeNull();
+  });
+});
+
+describe('RoundTimekeeper keeps every Round on a clock', () => {
+  it('arms the play deadline of the Round opened by an abort', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'PLAYING', roundNumber: 3 })],
+      playedCards: []
+    });
+
+    await timekeeper.onPlayExpired(ROUND_ID);
+
+    expect(fakes.store.armed.get(playKey('fake-round-4'))).toBe(60);
+  });
+
+  it('arms a judging deadline when the Round reaches judging', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'PLAYING' })]
+    });
+
+    await timekeeper.advanceToJudging(makeRound(), [makePlayedCard('player-a')]);
+
+    expect(fakes.store.armed.get(judgeKey(ROUND_ID))).toBe(90);
+    expect((await fakes.rounds.findById(ROUND_ID))?.judgeDeadline).not.toBeNull();
+  });
+});
+
+describe('RoundTimekeeper.onJudgeReturned', () => {
+  it('cancels the drop grace while playing so the Round is not aborted', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'PLAYING' })]
+    });
+    await timekeeper.armJudgeGrace(ROUND_ID);
+
+    await timekeeper.onJudgeReturned(ROUND_ID);
+
+    expect(fakes.store.cleared).toEqual([judgeKey(ROUND_ID)]);
+    expect((await fakes.rounds.findById(ROUND_ID))?.judgeDeadline).toBeNull();
+  });
+
+  it('restores a full judging window while judging', async () => {
+    const { timekeeper, fakes } = buildTimekeeper({
+      rounds: [makeRound({ status: 'JUDGING' })]
+    });
+    await timekeeper.armJudgeGrace(ROUND_ID);
+
+    await timekeeper.onJudgeReturned(ROUND_ID);
+
+    expect(fakes.store.armed.get(judgeKey(ROUND_ID))).toBe(90);
   });
 });

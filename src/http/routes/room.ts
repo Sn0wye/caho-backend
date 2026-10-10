@@ -12,6 +12,8 @@ import { getRoomBlackCardController } from '../controllers/room/get-room-black-c
 import { getCurrentWhiteCardsController } from '../controllers/room/get-current-white-cards';
 import { playCardsController } from '../controllers/room/play-card';
 import { getRoundPlayedCardsController } from '../controllers/room/get-round-played-cards';
+import { getRoundController } from '../controllers/room/get-round';
+import { judgeChooseWinner } from '../controllers/room/judge-choose-winner';
 
 export const roomRoutes = async (app: App) => {
   app.register(listPublicController);
@@ -27,4 +29,7 @@ export const roomRoutes = async (app: App) => {
   app.register(getCurrentWhiteCardsController);
   app.register(playCardsController);
   app.register(getRoundPlayedCardsController);
+  app.register(getRoundController);
+  // Without this the Judge had no way to pick, so every Round stalled in judging.
+  app.register(judgeChooseWinner);
 };

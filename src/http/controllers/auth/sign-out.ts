@@ -23,11 +23,9 @@ export const signOutController = async (app: App) => {
         const cookie = await authService.signOut(session.id);
         res.setCookie(cookie.name, cookie.value, cookie.attributes);
 
-        res.status(204);
-        return;
+        return res.status(204).send();
       } catch {
-        res.status(204);
-        return;
+        return res.status(204).send();
       }
     }
   );

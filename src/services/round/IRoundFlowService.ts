@@ -1,15 +1,10 @@
 import type {
   JudgeChooseWinnerDTO,
-  JudgePickResult
+  JudgePickResult,
+  NextRound,
+  PlayResult
 } from '@/services/room/IRoomService';
-import type {
-  BlackCard,
-  Player,
-  Round,
-  RoundPlayedCard,
-  RoundWithRelations,
-  WhiteCard
-} from '@/schemas';
+import type { Player, Round, RoundPlayedCard } from '@/schemas';
 
 // The slice of IRoomService that RoundFlow needs (ISP): play submission, the
 // all-active-played check, the active Round + its plays for the judging hand-off,
@@ -17,17 +12,12 @@ import type {
 // IRoomService so the orchestrator depends only on what it uses and its fake stays
 // small. RoomService implements the full interface, so it satisfies this. ADR-0004.
 export interface IRoundFlowService {
-  getPlayerFromRoom(roomCode: string, playerId: string): Promise<Player>;
-  updatePlayerInRoom(
-    roomCode: string,
-    playerId: string,
-    payload: Partial<Player>
-  ): Promise<Player>;
+  togglePlayerReady(roomCode: string, playerId: string): Promise<Player>;
   playCards(
     roomCode: string,
     playerId: string,
     playedCardIds: string[]
-  ): Promise<WhiteCard[]>;
+  ): Promise<PlayResult>;
   allActivePlayersPlayed(roomCode: string): Promise<boolean>;
   getActiveRound(roomCode: string): Promise<Round | null>;
   getRoundPlayedCards(
@@ -35,8 +25,5 @@ export interface IRoundFlowService {
     roundNumber: number
   ): Promise<RoundPlayedCard[]>;
   processJudgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<JudgePickResult>;
-  startNextRound(
-    roomCode: string,
-    currentRound: number
-  ): Promise<RoundWithRelations & { blackCard: BlackCard }>;
+  startNextRound(roomCode: string, currentRound: number): Promise<NextRound>;
 }

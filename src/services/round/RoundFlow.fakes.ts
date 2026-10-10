@@ -1,15 +1,10 @@
 import type {
   JudgeChooseWinnerDTO,
-  JudgePickResult
+  JudgePickResult,
+  NextRound,
+  PlayResult
 } from '@/services/room/IRoomService';
-import type {
-  BlackCard,
-  Player,
-  Round,
-  RoundPlayedCard,
-  RoundWithRelations,
-  WhiteCard
-} from '@/schemas';
+import type { Player, Round, RoundPlayedCard, WhiteCard } from '@/schemas';
 import type { IRoundClock } from './IRoundClock';
 import type { IRoundFlowService } from './IRoundFlowService';
 
@@ -47,7 +42,7 @@ export type RoundFlowServiceState = {
   activeRound: Round | null;
   plays: RoundPlayedCard[];
   judgeResult: JudgePickResult;
-  nextRound: RoundWithRelations & { blackCard: BlackCard };
+  nextRound: NextRound;
 };
 
 // Subset-of-IRoomService fake driven by seeded state; records the mutating calls so
@@ -58,11 +53,8 @@ export class FakeRoundFlowService implements IRoundFlowService {
     playerId: string;
     playedCardIds: string[];
   }> = [];
-  public readonly updatePlayerCalls: Array<{
-    roomCode: string;
-    playerId: string;
-    payload: Partial<Player>;
-  }> = [];
+  public readonly readyToggles: Array<{ roomCode: string; playerId: string }> =
+    [];
   public readonly judgeCalls: JudgeChooseWinnerDTO[] = [];
 
   constructor(private readonly state: Partial<RoundFlowServiceState>) {}
@@ -77,26 +69,23 @@ export class FakeRoundFlowService implements IRoundFlowService {
     return value as RoundFlowServiceState[K];
   }
 
-  async getPlayerFromRoom(): Promise<Player> {
-    return { ...this.require('player') };
+  async togglePlayerReady(roomCode: string, playerId: string): Promise<Player> {
+    this.readyToggles.push({ roomCode, playerId });
+    const player = this.require('player');
+    return { ...player, isReady: !player.isReady };
   }
 
-  async updatePlayerInRoom(
-    roomCode: string,
-    playerId: string,
-    payload: Partial<Player>
-  ): Promise<Player> {
-    this.updatePlayerCalls.push({ roomCode, playerId, payload });
-    return { ...this.require('player'), ...payload };
-  }
-
+  // Mirrors the domain step: the returned Player has played (isReady true).
   async playCards(
     roomCode: string,
     playerId: string,
     playedCardIds: string[]
-  ): Promise<WhiteCard[]> {
+  ): Promise<PlayResult> {
     this.playCardsCalls.push({ roomCode, playerId, playedCardIds });
-    return this.require('cardsDrawn');
+    return {
+      player: { ...this.require('player'), isReady: true },
+      cardsDrawn: this.require('cardsDrawn')
+    };
   }
 
   async allActivePlayersPlayed(): Promise<boolean> {
@@ -118,9 +107,7 @@ export class FakeRoundFlowService implements IRoundFlowService {
     return this.require('judgeResult');
   }
 
-  async startNextRound(): Promise<
-    RoundWithRelations & { blackCard: BlackCard }
-  > {
+  async startNextRound(): Promise<NextRound> {
     return this.require('nextRound');
   }
 }

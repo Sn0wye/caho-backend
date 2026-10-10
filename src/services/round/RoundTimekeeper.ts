@@ -11,11 +11,15 @@ export type RoundTimerConfig = {
   playWindowSeconds: number;
   // Grace a dropped Judge gets to reconnect before the Round aborts (ADR-0002).
   judgeGraceSeconds: number;
+  // How long a connected Judge has to pick once judging opens. Without it an
+  // AFK (but still connected) Judge stalled the Room forever.
+  judgeWindowSeconds: number;
 };
 
 export const DEFAULT_ROUND_TIMER_CONFIG: RoundTimerConfig = {
   playWindowSeconds: 60,
-  judgeGraceSeconds: 30
+  judgeGraceSeconds: 30,
+  judgeWindowSeconds: 90
 };
 
 // Drives Round deadlines off Redis key-expiry instead of an in-process timer, so
@@ -82,6 +86,9 @@ export class RoundTimekeeper {
       return false;
     }
 
+    // Judging gets its own deadline on the judge key; its expiry takes the same
+    // abort+rotate path as a lapsed drop grace.
+    await this.armJudgeDeadline(round.id, this.config.judgeWindowSeconds);
     await this.publisher.publish(round.roomCode, {
       event: 'room.time-to-judge',
       payload: { roundNumber: round.roundNumber, roundPlayedCards: plays }
@@ -94,7 +101,26 @@ export class RoundTimekeeper {
   // explicit leave ends the hold. The deadline is mirrored to Postgres as a
   // backstop for the startup sweep.
   public async armJudgeGrace(roundId: string): Promise<void> {
-    const ttl = this.config.judgeGraceSeconds;
+    await this.armJudgeDeadline(roundId, this.config.judgeGraceSeconds);
+  }
+
+  // The dropped Judge reconnected (ADR-0002: "held awaiting reconnect"). While
+  // playing, cancel the grace so the Round isn't aborted under them; while
+  // judging, give them a full judging window again. Previously the grace kept
+  // running and aborted the Round anyway.
+  public async onJudgeReturned(roundId: string): Promise<void> {
+    const round = await this.rounds.findById(roundId);
+    if (round?.status === 'JUDGING') {
+      await this.armJudgeDeadline(roundId, this.config.judgeWindowSeconds);
+      return;
+    }
+    if (round?.status === 'PLAYING') {
+      await this.store.clear(judgeKey(roundId));
+      await this.rounds.update(roundId, { judgeDeadline: null });
+    }
+  }
+
+  private async armJudgeDeadline(roundId: string, ttl: number): Promise<void> {
     await this.store.arm(judgeKey(roundId), ttl);
     await this.rounds.update(roundId, {
       judgeDeadline: new Date(Date.now() + ttl * 1000)
@@ -182,6 +208,9 @@ export class RoundTimekeeper {
       round.roundNumber
     );
 
+    // The next Round needs its own play clock; without it a Round opened by an
+    // abort had no deadline and one AFK Player could stall it forever.
+    await this.armPlayDeadline(next.id);
     await this.publisher.publish(round.roomCode, {
       event: 'room.round-start',
       payload: {

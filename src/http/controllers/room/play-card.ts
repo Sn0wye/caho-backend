@@ -15,12 +15,14 @@ export const playCardsController = async (app: App) => {
         params: z.object({
           roomCode: z.string().min(6).max(6)
         }),
+        // Body is the ordered list of White Card ids (order matters for pick 2/3).
+        body: z.array(z.string().min(1)).min(1).max(3),
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
     async (req, res) => {
       const user = req.getUser();
-      const playedCards = req.body as string[];
+      const playedCards = req.body;
       const { roomCode } = req.params;
 
       await roundFlow.playCards(roomCode, user.id, playedCards);

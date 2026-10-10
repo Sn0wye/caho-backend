@@ -94,6 +94,7 @@ export class FakeRoundRotator implements IRoundRotator {
   ): Promise<RoundRotation> {
     this.rotations.push({ roomCode, currentRound });
     return {
+      id: `fake-round-${currentRound + 1}`,
       roundNumber: currentRound + 1,
       judgeId: 'fake-next-judge',
       blackCard: { text: 'next black card', pick: 1, packId: 'fake-pack' }

@@ -1,7 +1,7 @@
 import { whiteCard } from './card';
 import { playerSchema } from './player';
 import { roomSchema } from './room';
-import { userSchema } from './user';
+import { publicUserSchema } from './user';
 import { z } from 'zod';
 
 // A Round walks a phase machine so a stalled Player or a vanished Judge can't
@@ -33,7 +33,7 @@ export const roundSchema = z.object({
 export const roundPlayedCardsSchema = z.object({
   id: z.string(),
   roundId: z.string(),
-  player: userSchema,
+  player: publicUserSchema,
   whiteCards: z.array(whiteCard),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date()

@@ -1,15 +1,25 @@
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
-import type { Player, Ranking, Room, Round } from '@/schemas';
-import type { IJudgeClock } from '@/services/round/IJudgeClock';
-import type { HostLossOutcome } from './IRoomService';
+import type { Player, Ranking, Room, Round, WhiteCard } from '@/schemas';
+import type { IRoomClock } from '@/services/round/IJudgeClock';
+import type { GameStart, HostLossOutcome } from './IRoomService';
 import type { IRoomOrchestratorService } from './IRoomOrchestratorService';
 
 // Records the Judge-clock calls RoomOrchestrator makes on a departure, so specs can
 // assert a drop armed grace and a Leave expired it now.
-export class FakeJudgeClock implements IJudgeClock {
+export class FakeJudgeClock implements IRoomClock {
   public readonly gracedRoundIds: string[] = [];
   public readonly expiredRoundIds: string[] = [];
+  public readonly returnedRoundIds: string[] = [];
+  public readonly armedPlayRoundIds: string[] = [];
+
+  async onJudgeReturned(roundId: string): Promise<void> {
+    this.returnedRoundIds.push(roundId);
+  }
+
+  async armPlayDeadline(roundId: string): Promise<void> {
+    this.armedPlayRoundIds.push(roundId);
+  }
 
   async armJudgeGrace(roundId: string): Promise<void> {
     this.gracedRoundIds.push(roundId);
@@ -27,6 +37,8 @@ export type RoomOrchestratorState = {
   presencePlayer: Player;
   activeRound: Round | null;
   roomCodes: string[];
+  gameStart: GameStart;
+  dealtHand: WhiteCard[];
 };
 
 // Subset-of-IRoomService fake driven by seeded state; records the mutating calls so
@@ -60,6 +72,17 @@ export class FakeRoomOrchestratorService implements IRoomOrchestratorService {
   async joinRoom(input: JoinRoomDTO): Promise<Room> {
     this.joined.push(input);
     return this.require('room');
+  }
+
+  async startGame(): Promise<GameStart> {
+    return this.require('gameStart');
+  }
+
+  public readonly dealHandCalls: Array<{ roomCode: string; playerId: string; count: number }> = [];
+
+  async dealHand(roomCode: string, playerId: string, count: number): Promise<WhiteCard[]> {
+    this.dealHandCalls.push({ roomCode, playerId, count });
+    return this.require('dealtHand');
   }
 
   async leaveRoom(input: LeaveRoomDTO): Promise<void> {

@@ -106,7 +106,7 @@ function build(state: Partial<RoomOrchestratorState>): Harness {
 
 describe('RoomOrchestrator.joinRoom', () => {
   it('adds the Player and announces the join', async () => {
-    const room = makeRoom();
+    const room = makeRoom({ status: 'LOBBY' });
     const { orchestrator, rooms, publisher } = build({ room });
     const input: JoinRoomDTO = {
       roomCode: ROOM_CODE,
@@ -124,6 +124,84 @@ describe('RoomOrchestrator.joinRoom', () => {
         event: { event: 'room.player-joined', payload: makeRoomPlayer() }
       }
     ]);
+  });
+});
+
+describe('RoomOrchestrator.joinRoom mid-game', () => {
+  it('deals a late joiner a Hand on their private channel', async () => {
+    const hand = [{ id: 'w1', text: 'white', packId: 'p' }];
+    const { orchestrator, rooms, publisher } = build({
+      room: makeRoom({ status: 'IN_PROGRESS' }),
+      dealtHand: hand
+    });
+
+    await orchestrator.joinRoom({ roomCode: ROOM_CODE, password: null, player: makePlayer() });
+
+    expect(rooms.dealHandCalls).toEqual([
+      { roomCode: ROOM_CODE, playerId: 'player-a', count: 10 }
+    ]);
+    expect(publisher.published.at(-1)).toEqual({
+      channel: 'player-a',
+      event: { event: 'player.cards-drawn', payload: hand }
+    });
+  });
+});
+
+describe('RoomOrchestrator.startRoom', () => {
+  it('broadcasts the sanitized start, sends each Hand privately, arms Round 1 and announces it', async () => {
+    const blackCard = { id: 'b1', text: 'black', pick: 1, packId: 'p' };
+    const hand = [{ id: 'w1', text: 'white', packId: 'p' }];
+    const host = makePlayer({ id: HOST_ID, isHost: true });
+    const { orchestrator, clock, publisher } = build({
+      gameStart: {
+        room: makeRoom({ password: 'secret', round: 1 }),
+        players: [host],
+        round: { ...makeRound(), id: 'round-1', roundNumber: 1 },
+        blackCard,
+        hands: [{ playerId: HOST_ID, cards: hand }]
+      }
+    });
+
+    await orchestrator.startRoom(ROOM_CODE, HOST_ID);
+
+    const [started, cards, roundStart] = publisher.published;
+    expect(started.event.event).toBe('room.started');
+    expect(JSON.stringify(started.event.payload)).not.toContain('secret');
+    expect(cards).toEqual({
+      channel: HOST_ID,
+      event: { event: 'player.cards-drawn', payload: hand }
+    });
+    expect(clock.armedPlayRoundIds).toEqual(['round-1']);
+    expect(roundStart.event).toEqual({
+      event: 'room.round-start',
+      payload: { roundNumber: 1, judgeId: JUDGE_ID, blackCard }
+    });
+  });
+});
+
+describe('RoomOrchestrator.markPresence reconnect', () => {
+  it('releases the held Round when the dropped Judge reconnects', async () => {
+    const { orchestrator, clock } = build({
+      room: makeRoom(),
+      presencePlayer: makePlayer({ id: JUDGE_ID }),
+      activeRound: makeRound()
+    });
+
+    await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, true);
+
+    expect(clock.returnedRoundIds).toEqual(['round-2']);
+  });
+
+  it('does not touch the clock when a non-Judge reconnects', async () => {
+    const { orchestrator, clock } = build({
+      room: makeRoom(),
+      presencePlayer: makePlayer(),
+      activeRound: makeRound()
+    });
+
+    await orchestrator.markPresence(ROOM_CODE, 'player-a', true);
+
+    expect(clock.returnedRoundIds).toHaveLength(0);
   });
 });
 
