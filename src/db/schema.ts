@@ -232,6 +232,11 @@ export const roundPlayedCards = pgTable(
   },
   table => ({
     roundIdIdx: index('round_played_cards_round_id_idx').on(table.roundId),
+    // One answer per Player per Round, enforced even if two plays race.
+    roundPlayerIdx: uniqueIndex('round_played_cards_round_player_idx').on(
+      table.roundId,
+      table.playerId
+    ),
     playerIdIdx: index('round_played_cards_player_id_idx').on(table.playerId)
   })
 );
@@ -250,7 +255,10 @@ export const roundPlayedCardWhiteCards = pgTable(
       .references(() => whiteCards.id, {
         onDelete: 'cascade',
         onUpdate: 'cascade'
-      })
+      }),
+    // Order the Player submitted the cards in: a pick-2/3 Black Card reads as a
+    // sentence, so the answer must come back in the same order it was played.
+    position: integer('position').notNull().default(0)
   },
   table => ({
     pk: primaryKey({ columns: [table.roundPlayedCardId, table.whiteCardId] })

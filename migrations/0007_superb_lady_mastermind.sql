@@ -1,0 +1,2 @@
+ALTER TABLE "round_played_card_white_cards" ADD COLUMN "position" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "round_played_cards_round_player_idx" ON "round_played_cards" ("round_id","player_id");

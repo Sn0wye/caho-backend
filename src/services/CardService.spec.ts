@@ -105,6 +105,21 @@ describe('CardService.getNewWhiteCards', () => {
   });
 });
 
+describe('CardService.getNewWhiteCards when the pool runs dry', () => {
+  it('tops up from a restarted ledger instead of dealing short', async () => {
+    const { service, rooms } = buildService({
+      room: makeRoom({ pickedWhiteCards: ['w1', 'w2'] }),
+      whiteCards: [white('w1'), white('w2'), white('w3')]
+    });
+
+    const drawn = await service.getNewWhiteCards(2);
+
+    expect(drawn.map(card => card.id)).toEqual(['w3', 'w1']);
+    const room = await rooms.getRoomByCode(ROOM_CODE);
+    expect(room?.pickedWhiteCards).toEqual(['w3', 'w1']);
+  });
+});
+
 describe('CardService.getNewBlackCard', () => {
   it('draws a Black Card excluding picked ones and sets it as current', async () => {
     const { service, rooms } = buildService({
@@ -120,11 +135,21 @@ describe('CardService.getNewBlackCard', () => {
     expect(room?.currentBlackCardId).toBe('b2');
   });
 
-  it('throws with the Room code when no Black Card is left to draw', async () => {
-    const { service } = buildService({
-      room: makeRoom({ pickedBlackCards: ['b1'] }),
-      blackCards: [black('b1')]
+  it('reshuffles the discards, skipping the current card, once every card was shown', async () => {
+    const { service, rooms } = buildService({
+      room: makeRoom({ pickedBlackCards: ['b1', 'b2'], currentBlackCardId: 'b1' }),
+      blackCards: [black('b1'), black('b2')]
     });
+
+    const drawn = await service.getNewBlackCard();
+
+    expect(drawn.id).toBe('b2');
+    const room = await rooms.getRoomByCode(ROOM_CODE);
+    expect(room?.pickedBlackCards).toEqual(['b2']);
+  });
+
+  it('throws with the Room code when the pack has no Black Card at all', async () => {
+    const { service } = buildService({ blackCards: [] });
 
     await expect(service.getNewBlackCard()).rejects.toThrow(ROOM_CODE);
   });

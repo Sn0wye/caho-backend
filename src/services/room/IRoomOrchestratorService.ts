@@ -1,7 +1,7 @@
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
-import type { Player, Ranking, Room, Round } from '@/schemas';
-import type { HostLossOutcome } from './IRoomService';
+import type { Player, Ranking, Room, Round, WhiteCard } from '@/schemas';
+import type { GameStart, HostLossOutcome } from './IRoomService';
 
 // The slice of IRoomService that RoomOrchestrator needs (ISP): membership
 // (join/leave), the end-game projection, presence toggling, and the
@@ -11,6 +11,8 @@ import type { HostLossOutcome } from './IRoomService';
 export interface IRoomOrchestratorService {
   getRoom(roomCode: string): Promise<Room>;
   joinRoom(input: JoinRoomDTO): Promise<Room>;
+  startGame(roomCode: string, requesterId: string): Promise<GameStart>;
+  dealHand(roomCode: string, playerId: string, count: number): Promise<WhiteCard[]>;
   leaveRoom(input: LeaveRoomDTO): Promise<void>;
   endGame(roomCode: string): Promise<Ranking>;
   handleHostLoss(

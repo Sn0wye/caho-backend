@@ -1,6 +1,7 @@
 import {
   ApplicationError,
   BadRequestError,
+  ForbiddenError,
   InternalServerError,
   NotFoundError
 } from '@/errors';
@@ -10,22 +11,25 @@ import type { IRoomRepository } from '@/repositories/room';
 import type { IRoomPlayersRepository } from '@/repositories/room-players';
 import { generateCode } from '@/utils/generateCode';
 import type {
-  BlackCard,
   Player,
   PublicRoomWithPlayerCountAndHost,
   Ranking,
   Room,
   Round,
   RoundPlayedCard,
-  RoundWithRelations,
   WhiteCard
 } from '@/schemas';
 import { createId } from '@paralleldrive/cuid2';
 import type {
+  DealtHand,
+  GameStart,
   HostLossOutcome,
   IRoomService,
   JudgeChooseWinnerDTO,
-  JudgePickResult
+  JudgePickResult,
+  NextRound,
+  PlayResult,
+  RoundSnapshot
 } from './IRoomService';
 import type { CreateRoomDTO } from '@/dto/CreateRoom';
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
@@ -34,7 +38,10 @@ import { CardServiceFactory } from '../CardServiceFactory';
 import type { IRoundRepository } from '@/repositories/round';
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import { getRandomJudge } from '@/utils/getRandomJudge';
+import { assertPlayableCards } from '@/services/round/assertPlayableCards';
 import type { IWhiteCardDealer } from './IWhiteCardDealer';
+import type { IBlackCardDeck } from './IBlackCardDeck';
+import { HAND_SIZE, assertRoomCanStart } from './gameRules';
 
 export class RoomService implements IRoomService {
   constructor(
@@ -43,7 +50,8 @@ export class RoomService implements IRoomService {
     private readonly roomPlayersRepository: IRoomPlayersRepository,
     private readonly roundsRepository: IRoundRepository,
     private readonly roundPlayedCardsRepository: IRoundPlayedCardsRepository,
-    private readonly whiteCardDealer: IWhiteCardDealer
+    private readonly whiteCardDealer: IWhiteCardDealer,
+    private readonly blackCardDeck: IBlackCardDeck
   ) {}
 
   public async getRoom(roomCode: string): Promise<Room> {
@@ -94,11 +102,7 @@ export class RoomService implements IRoomService {
     roomCode: string;
     player: Player;
   }): Promise<void> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
-
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
+    await this.getRoom(roomCode);
 
     try {
       return await this.roomPlayersRepository.addPlayerToRoom({
@@ -110,28 +114,40 @@ export class RoomService implements IRoomService {
     }
   }
 
-  public async startRoom(roomCode: string): Promise<void> {
-    const existingRoom = await this.roomRepository.getRoomByCode(roomCode);
+  // The Host starts the game: pick the first Judge, draw the first Black Card,
+  // deal every Player a Hand and open Round 1. Moved out of the start-room
+  // controller so the rules are testable and broadcasts live in the
+  // orchestrator (ADR-0004). Hands persist across Rounds. issue #1, slice 3.
+  public async startGame(
+    roomCode: string,
+    requesterId: string
+  ): Promise<GameStart> {
+    const room = await this.getRoom(roomCode);
+    const players = await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+    assertRoomCanStart(room, players, requesterId);
 
-    if (!existingRoom) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
+    const judgeId = getRandomJudge(null, players);
+    const blackCard = await this.blackCardDeck.drawBlackCard(roomCode);
+    await this.roomPlayersRepository.setPlayersAsUnready(roomCode);
+    const startedRoom = await this.roomRepository.update(roomCode, {
+      status: 'IN_PROGRESS',
+      round: 1,
+      judgeId,
+      prevJudgeId: null,
+      currentBlackCardId: blackCard.id
+    });
 
-    const players =
-      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
-    const playersReady = players.every(p => p.isReady);
+    const hands = await this.dealInitialHands({ roomCode, cardsPerPlayer: HAND_SIZE });
+    const round = await this.createRound({
+      roomCode,
+      judgeId,
+      blackCardId: blackCard.id,
+      roundNumber: 1,
+      roundWinnerId: null
+    });
+    const startedPlayers = await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
 
-    if (!playersReady) {
-      throw new BadRequestError(ROOM_ERRORS.NOT_ALL_PLAYERS_READY);
-    }
-
-    try {
-      await this.roomRepository.update(existingRoom.id, {
-        status: 'IN_PROGRESS'
-      });
-    } catch {
-      throw new InternalServerError('Erro ao iniciar sala.');
-    }
+    return { room: startedRoom, players: startedPlayers, round, blackCard, hands };
   }
 
   // Single end-of-game path: both the host's manual /end and the maxPoints
@@ -139,6 +155,7 @@ export class RoomService implements IRoomService {
   // Ranking is built exactly one way. See issue #1, slice 2.
   public async endGame(roomCode: string): Promise<Ranking> {
     try {
+      await this.abortActiveRound(roomCode);
       await this.roomRepository.update(roomCode, {
         status: 'FINISHED'
       });
@@ -152,33 +169,29 @@ export class RoomService implements IRoomService {
     }
   }
 
+  // Close the in-flight Round so its pending play/judge timers become no-ops
+  // (their claims need PLAYING/JUDGING). Without this a finished game kept
+  // rotating Rounds when the timers fired. ADR-0003.
+  private async abortActiveRound(roomCode: string): Promise<void> {
+    const room = await this.roomRepository.getRoomByCode(roomCode);
+    const round = room ? await this.roundsRepository.find(roomCode, room.round) : null;
+    if (!round) {
+      return;
+    }
+    await this.roundsRepository.claimAdvance(round.id, ['PLAYING', 'JUDGING'], 'ABORTED');
+  }
+
   public async joinRoom(input: JoinRoomDTO): Promise<Room> {
     const { roomCode, player, password } = input;
 
     try {
-      const room = await this.roomRepository.getRoomByCode(roomCode);
-
-      if (!room) {
-        throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-      }
+      const room = await this.getRoom(roomCode);
 
       player.isHost = room.hostId === player.id;
       const players =
         await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
 
-      const playerAlreadyInRoom = players.some(p => p.id === player.id);
-      if (playerAlreadyInRoom) {
-        throw new BadRequestError(ROOM_ERRORS.PLAYER_ALREADY_IN_ROOM);
-      }
-
-      if (players.length >= room.maxPlayers) {
-        throw new BadRequestError(ROOM_ERRORS.ROOM_IS_FULL);
-      }
-
-      if (!room.isPublic && room.password !== password) {
-        throw new BadRequestError(ROOM_ERRORS.WRONG_PASSWORD);
-      }
-
+      this.assertCanJoin(room, players, player.id, password);
       await this.addPlayerToRoom({ player, roomCode });
 
       return room;
@@ -188,6 +201,28 @@ export class RoomService implements IRoomService {
       }
 
       throw new InternalServerError('Erro ao entrar na sala.');
+    }
+  }
+
+  // Joining an IN_PROGRESS Room is allowed (the orchestrator deals the newcomer
+  // a Hand); a FINISHED Room is over and cannot be joined.
+  private assertCanJoin(
+    room: Room,
+    players: Player[],
+    playerId: string,
+    password: string | null
+  ): void {
+    if (room.status === 'FINISHED') {
+      throw new BadRequestError(ROOM_ERRORS.ROOM_FINISHED);
+    }
+    if (players.some(p => p.id === playerId)) {
+      throw new BadRequestError(ROOM_ERRORS.PLAYER_ALREADY_IN_ROOM);
+    }
+    if (players.length >= room.maxPlayers) {
+      throw new BadRequestError(ROOM_ERRORS.ROOM_IS_FULL);
+    }
+    if (!room.isPublic && room.password !== password) {
+      throw new BadRequestError(ROOM_ERRORS.WRONG_PASSWORD);
     }
   }
 
@@ -220,7 +255,7 @@ export class RoomService implements IRoomService {
   ): Promise<HostLossOutcome> {
     const room = await this.getRoom(roomCode);
 
-    if (room.hostId !== departingPlayerId) {
+    if (room.hostId !== departingPlayerId || room.status === 'FINISHED') {
       return { kind: 'not-host' };
     }
 
@@ -250,7 +285,9 @@ export class RoomService implements IRoomService {
       return { kind: 'room-ended', ranking };
     }
 
-    await this.roomRepository.update(room.id, { hostId: heir.id });
+    // The repository keys Rooms by Code; passing room.id here silently updated
+    // nothing, so the Host was never actually reassigned.
+    await this.roomRepository.update(room.code, { hostId: heir.id });
     await this.clearDepartedHostFlag(room.code, departingPlayerId);
 
     const newHost = await this.updatePlayerInRoom(room.code, heir.id, {
@@ -288,6 +325,25 @@ export class RoomService implements IRoomService {
     return await this.updatePlayerInRoom(roomCode, playerId, { isActive });
   }
 
+  // Lobby ready toggle. Mid-game, `isReady` means "has played this Round", so
+  // toggling it there let a Player skip a Round or play twice.
+  public async togglePlayerReady(
+    roomCode: string,
+    playerId: string
+  ): Promise<Player> {
+    const room = await this.getRoom(roomCode);
+    if (room.status !== 'LOBBY') {
+      throw new BadRequestError(
+        `Só é possível ficar pronto no lobby (status da sala ${roomCode}: ${room.status}).`
+      );
+    }
+
+    const player = await this.getPlayerFromRoom(roomCode, playerId);
+    return await this.updatePlayerInRoom(roomCode, playerId, {
+      isReady: !player.isReady
+    });
+  }
+
   // True once every active non-Judge Player has played this Round. Inactive
   // Players are never awaited, so they are excluded from the count. See ADR-0002.
   public async allActivePlayersPlayed(roomCode: string): Promise<boolean> {
@@ -301,11 +357,7 @@ export class RoomService implements IRoomService {
   }
 
   public async getRoomPlayers(roomCode: string): Promise<Player[]> {
-    const exists = await this.roomRepository.getRoomByCode(roomCode);
-
-    if (!exists) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
+    await this.getRoom(roomCode);
 
     try {
       const players =
@@ -317,12 +369,7 @@ export class RoomService implements IRoomService {
   }
 
   public async getRoomBlackCardId(roomCode: string): Promise<string | null> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
-
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
-
+    const room = await this.getRoom(roomCode);
     return room.currentBlackCardId;
   }
 
@@ -338,20 +385,11 @@ export class RoomService implements IRoomService {
         playerId,
         payload
       );
-
-      const updatedPlayer = await this.roomPlayersRepository.getPlayerFromRoom(
-        roomCode,
-        playerId
-      );
-
-      if (!updatedPlayer) {
-        throw new NotFoundError(ROOM_ERRORS.PLAYER_NOT_FOUND);
-      }
-
-      return updatedPlayer;
     } catch {
       throw new InternalServerError('Erro ao atualizar jogador na sala.');
     }
+
+    return await this.getPlayerFromRoom(roomCode, playerId);
   }
 
   public async getPlayerFromRoom(
@@ -400,20 +438,8 @@ export class RoomService implements IRoomService {
     roomCode: string,
     playerId: string
   ): Promise<WhiteCard[]> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
-
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
-
-    const player = await this.roomPlayersRepository.getPlayerFromRoom(
-      roomCode,
-      playerId
-    );
-
-    if (!player) {
-      throw new NotFoundError(ROOM_ERRORS.PLAYER_NOT_FOUND);
-    }
+    await this.getRoom(roomCode);
+    const player = await this.getPlayerFromRoom(roomCode, playerId);
 
     // Resolve the player's Hand (stored as ids) against the DB card pool. See
     // issue #5 (cards moved to the database).
@@ -425,59 +451,66 @@ export class RoomService implements IRoomService {
     return hand.filter((card): card is WhiteCard => card !== undefined);
   }
 
+  // A Player submits their answer. The rules (phase, not the Judge, one play per
+  // Round, cards from their own Hand, count matches the Black Card's pick) live
+  // in assertPlayableCards. Returns the Player as now stored plus the refill.
   public async playCards(
     roomCode: string,
     playerId: string,
     playedCardIds: string[]
-  ): Promise<WhiteCard[]> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
-
-    const player = await this.roomPlayersRepository.getPlayerFromRoom(
-      roomCode,
-      playerId
-    );
-
-    if (!player) {
-      throw new NotFoundError(ROOM_ERRORS.PLAYER_NOT_FOUND);
-    }
-
-    // get the current round or create a new one.
-
-    const currentRound = await this.roundsRepository.find(roomCode, room.round);
-
-    if (!currentRound) {
-      throw new NotFoundError(ROOM_ERRORS.ROUND_NOT_FOUND);
-    }
+  ): Promise<PlayResult> {
+    const round = await this.requireActiveRound(roomCode);
+    const player = await this.getPlayerFromRoom(roomCode, playerId);
+    const blackCard = await this.blackCardDeck.findBlackCard(roomCode, round.blackCardId);
+    assertPlayableCards({ round, player, playedCardIds, pick: blackCard?.pick ?? 1 });
 
     await this.roundPlayedCardsRepository.create({
       playerId: player.id,
-      roundId: currentRound.id,
+      roundId: round.id,
       whiteCardIds: playedCardIds
     });
 
-    // Refill exactly the cards just played so the Hand tops back up to its
-    // standing size (10) and persists into the next Round. issue #1, slice 3.
+    const cardsDrawn = await this.refillHand(roomCode, player, playedCardIds);
+    return { player: await this.getPlayerFromRoom(roomCode, playerId), cardsDrawn };
+  }
+
+  // Refill exactly the cards just played so the Hand tops back up to its
+  // standing size (10) and persists into the next Round. issue #1, slice 3.
+  private async refillHand(
+    roomCode: string,
+    player: Player,
+    playedCardIds: string[]
+  ): Promise<WhiteCard[]> {
     const newWhiteCards = await this.whiteCardDealer.dealWhiteCards(
       roomCode,
       playedCardIds.length
     );
+    const cardIds = player.cardIds
+      .filter(cardId => !playedCardIds.includes(cardId))
+      .concat(newWhiteCards.map(card => card.id));
 
-    // remove cards from player hand and complete with new cards
-    player.cardIds = player.cardIds.filter(
-      cardId => !playedCardIds.includes(cardId)
-    );
-
-    player.cardIds.push(...newWhiteCards.map(card => card.id));
-
-    await this.roomPlayersRepository.updatePlayerInRoom(roomCode, playerId, {
-      cardIds: player.cardIds,
+    await this.roomPlayersRepository.updatePlayerInRoom(roomCode, player.id, {
+      cardIds,
       isReady: true
     });
-
     return newWhiteCards;
+  }
+
+  // The current Round of an in-progress Room, or a 4xx explaining why there is
+  // none (Room not started / finished, or the Round row is missing).
+  private async requireActiveRound(roomCode: string): Promise<Round> {
+    const room = await this.getRoom(roomCode);
+    if (room.status !== 'IN_PROGRESS') {
+      throw new BadRequestError(
+        `A sala ${roomCode} não está em jogo (status: ${room.status}, esperado: IN_PROGRESS).`
+      );
+    }
+
+    const round = await this.roundsRepository.find(roomCode, room.round);
+    if (!round) {
+      throw new NotFoundError(ROOM_ERRORS.ROUND_NOT_FOUND);
+    }
+    return round;
   }
 
   public async setPlayersAsUnready(roomCode: string): Promise<void> {
@@ -529,198 +562,155 @@ export class RoomService implements IRoomService {
   // Drives presence-driven Judge-loss: a drop arms the judge-grace timer on this
   // Round, an explicit Judge leave aborts it. See ADR-0002/0003, issue #4.
   public async getActiveRound(roomCode: string): Promise<Round | null> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
-
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
-
+    const room = await this.getRoom(roomCode);
     return await this.roundsRepository.find(roomCode, room.round);
   }
 
-  public async getRoundNumber(roomCode: string): Promise<number> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
-
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
-
-    return room.round;
-  }
-
-  // Internal helper of processJudgeChooseWinner — records the Judge's pick and
-  // returns the winning Played Card. Not on IRoomService: orchestration calls the
-  // richer processJudgeChooseWinner, never this directly. See ADR-0004.
-  private async judgeChooseWinner(
-    data: JudgeChooseWinnerDTO
-  ): Promise<RoundPlayedCard> {
-    const room = await this.getRoom(data.roomCode);
-
-    if (!room) {
-      throw new NotFoundError('Room not found');
-    }
-
-    const player = await this.getPlayerFromRoom(
-      data.roomCode,
-      data.judgePlayerId
-    );
-
-    if (!player) {
-      throw new NotFoundError('Player not found');
-    }
-
-    if (!player.isJudge) {
-      throw new Error('Player is not a judge');
-    }
-
-    const round = await this.roundsRepository.find(data.roomCode, room.round);
-
+  // Everything a (re)connecting client needs to render the current Round, since
+  // WS events are only live deltas. Played Cards are hidden until judging, when
+  // `room.time-to-judge` reveals them to the whole Room anyway.
+  public async getRoundSnapshot(roomCode: string): Promise<RoundSnapshot | null> {
+    const round = await this.getActiveRound(roomCode);
     if (!round) {
-      throw new NotFoundError('Round not found');
+      return null;
     }
 
-    round.roundWinnerId = data.winnerPlayerId;
-    round.updatedAt = new Date();
-
-    try {
-      await this.roundsRepository.update(round.id, round);
-    } catch (error) {
-      throw new InternalServerError('Erro ao escolher vencedor.');
-    }
-
-    const roundPlayedCards =
-      await this.roundPlayedCardsRepository.findByRoomCodeAndRoundNumber(
-        data.roomCode,
-        room.round
-      );
-
-    const winner = roundPlayedCards.find(
-      roundPlayedCard => roundPlayedCard.player.id === data.winnerPlayerId
-    );
-
-    if (!winner) {
-      throw new NotFoundError('Vencedor não encontrado');
-    }
-
-    return winner;
-  }
-
-  public async startNextRound(
-    roomCode: string,
-    currentRound: number
-  ): Promise<
-    RoundWithRelations & {
-      blackCard: BlackCard;
-    }
-  > {
-    const [room, players, round] = await Promise.all([
-      this.roomRepository.getRoomByCode(roomCode),
-      this.roomPlayersRepository.getRoomPlayersByCode(roomCode),
-      this.roundsRepository.find(roomCode, currentRound)
-    ]);
-
-    if (!room) {
-      throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
-    }
-
-    if (!round) {
-      throw new NotFoundError(ROOM_ERRORS.ROUND_NOT_FOUND);
-    }
-
-    const cardService = CardServiceFactory(roomCode);
-    const newBlackCard = await cardService.getNewBlackCard();
-
-    const nextJudgeId = getRandomJudge(room.prevJudgeId, players);
-
-    const updatedRoom = await this.roomRepository.update(room.id, {
-      round: room.round + 1,
-      judgeId: nextJudgeId,
-      prevJudgeId: room.judgeId
-    });
-
-    const nextRound = await this.roundsRepository.create({
-      id: createId(),
-      roomCode,
-      judgeId: nextJudgeId,
-      blackCardId: newBlackCard.id,
-      roundNumber: round.roundNumber + 1,
-      roundWinnerId: null,
-      status: 'PLAYING',
-      playDeadline: null,
-      judgeDeadline: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-
-    const judge = players.find(player => player.id === nextJudgeId);
-
-    if (!judge) {
-      throw new NotFoundError('Judge not found');
-    }
-
-    const blackCard = await cardService.getBlackCardById(newBlackCard.id);
-    if (!blackCard) {
-      throw new NotFoundError('Black card not found');
-    }
+    const blackCard = await this.blackCardDeck.findBlackCard(roomCode, round.blackCardId);
+    const revealed = round.status === 'JUDGING' || round.status === 'COMPLETE';
+    const roundPlayedCards = revealed
+      ? await this.getRoundPlayedCards(roomCode, round.roundNumber)
+      : [];
 
     return {
-      ...nextRound,
-      room: updatedRoom,
-      judge,
-      roundWinner: null,
-      roundPlayedCards: [],
-      blackCardId: blackCard.id,
-      blackCard
+      roundNumber: round.roundNumber,
+      status: round.status,
+      judgeId: round.judgeId,
+      playDeadline: round.playDeadline,
+      judgeDeadline: round.judgeDeadline,
+      blackCard: blackCard ?? null,
+      roundPlayedCards
     };
   }
 
+  public async getRoundNumber(roomCode: string): Promise<number> {
+    const room = await this.getRoom(roomCode);
+    return room.round;
+  }
+
+  // Open the Round after `currentRound`: rotate the Judge away from the one who
+  // just judged, draw a Black Card and reset everyone's "played" flag. Callers
+  // pass the Round they are leaving; a stale number (another path already
+  // rotated) is rejected so two paths can't open two Rounds.
+  public async startNextRound(
+    roomCode: string,
+    currentRound: number
+  ): Promise<NextRound> {
+    const room = await this.getRoom(roomCode);
+    this.assertCanRotate(room, currentRound);
+
+    const players = await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+    // Exclude the Judge who just judged (room.judgeId). Excluding prevJudgeId
+    // let the same Player judge twice in a row.
+    const nextJudgeId = getRandomJudge(room.judgeId, players);
+    const blackCard = await this.blackCardDeck.drawBlackCard(roomCode);
+
+    // `isReady` doubles as "played this Round"; never resetting it locked every
+    // Player out of Round 2 with "already played".
+    await this.roomPlayersRepository.setPlayersAsUnready(roomCode);
+    const updatedRoom = await this.roomRepository.update(roomCode, {
+      round: currentRound + 1,
+      judgeId: nextJudgeId,
+      prevJudgeId: room.judgeId
+    });
+    const nextRound = await this.createRound({
+      roomCode,
+      judgeId: nextJudgeId,
+      blackCardId: blackCard.id,
+      roundNumber: currentRound + 1,
+      roundWinnerId: null
+    });
+
+    const judge = await this.getPlayerFromRoom(roomCode, nextJudgeId);
+    return { ...nextRound, room: updatedRoom, judge, roundWinner: null, roundPlayedCards: [], blackCard };
+  }
+
+  private assertCanRotate(room: Room, currentRound: number): void {
+    if (room.status !== 'IN_PROGRESS') {
+      throw new BadRequestError(
+        `Não há próxima rodada: a sala ${room.code} está ${room.status}, esperado IN_PROGRESS.`
+      );
+    }
+    if (room.round !== currentRound) {
+      throw new BadRequestError(
+        `Rodada ${currentRound} já encerrada; a sala ${room.code} está na rodada ${room.round}.`
+      );
+    }
+  }
+
+  // The Judge picks the winning Played Card. Only the Room's Judge, only while
+  // the Round is JUDGING, only a Player who played. The JUDGING -> COMPLETE claim
+  // is the guard against a double-click scoring twice or a pick racing the
+  // judging deadline. Scores the winner — issue #1, slice 1.
   public async processJudgeChooseWinner({
     roomCode,
     judgePlayerId,
     winnerPlayerId
-  }: {
-    roomCode: string;
-    judgePlayerId: string;
-    winnerPlayerId: string;
-  }): Promise<JudgePickResult> {
+  }: JudgeChooseWinnerDTO): Promise<JudgePickResult> {
     const room = await this.getRoom(roomCode);
-
-    if (!room) {
-      throw new NotFoundError('Room not found');
+    if (room.judgeId !== judgePlayerId) {
+      throw new ForbiddenError(
+        `Apenas o juiz da rodada pode escolher (juiz: ${room.judgeId}, você: ${judgePlayerId}).`
+      );
     }
 
-    const player = await this.getPlayerFromRoom(roomCode, judgePlayerId);
+    const round = await this.requireActiveRound(roomCode);
+    const winner = await this.findWinningPlay(round, winnerPlayerId);
+    await this.claimJudgedRound(round, winner);
 
-    if (!player) {
-      throw new NotFoundError('Player not found');
-    }
-
-    if (!player.isJudge) {
-      throw new Error('Player is not a judge');
-    }
-
-    const winner = await this.judgeChooseWinner({
-      judgePlayerId: player.id,
-      roomCode: room.code,
-      winnerPlayerId
-    });
-
-    // The Judge's pick scores the winner — issue #1, slice 1. The played card's
-    // `player` is a bare User and cannot carry score, so we fetch the updated
-    // Player to broadcast the new score.
-    await this.incrementPlayerScore({
-      roomCode: room.code,
-      playerId: winnerPlayerId,
-      by: 1
-    });
-    const winnerPlayer = await this.getPlayerFromRoom(room.code, winnerPlayerId);
+    await this.incrementPlayerScore({ roomCode, playerId: winnerPlayerId, by: 1 });
+    const winnerPlayer = await this.getPlayerFromRoom(roomCode, winnerPlayerId);
 
     // Win-condition branch: reaching maxPoints ends the game instead of dealing
     // another Round. issue #1, slice 2.
     const gameEnded = winnerPlayer.score >= room.maxPoints;
-    const ranking = gameEnded ? await this.endGame(room.code) : null;
+    const ranking = gameEnded ? await this.endGame(roomCode) : null;
 
     return { room, winner, winnerPlayer, gameEnded, ranking };
+  }
+
+  private async findWinningPlay(
+    round: Round,
+    winnerPlayerId: string
+  ): Promise<RoundPlayedCard> {
+    if (round.status !== 'JUDGING') {
+      throw new BadRequestError(
+        `A rodada ${round.roundNumber} não está em julgamento (fase: ${round.status}).`
+      );
+    }
+
+    const plays = await this.getRoundPlayedCards(round.roomCode, round.roundNumber);
+    const winner = plays.find(play => play.player.id === winnerPlayerId);
+    const stillInRoom = await this.roomPlayersRepository.getPlayerFromRoom(round.roomCode, winnerPlayerId);
+    if (!winner || !stillInRoom) {
+      throw new BadRequestError(
+        `O jogador ${winnerPlayerId} não tem jogada válida na rodada ${round.roundNumber}.`
+      );
+    }
+    return winner;
+  }
+
+  private async claimJudgedRound(round: Round, winner: RoundPlayedCard): Promise<void> {
+    const claimed = await this.roundsRepository.claimAdvance(round.id, 'JUDGING', 'COMPLETE');
+    if (!claimed) {
+      throw new BadRequestError(
+        `A rodada ${round.roundNumber} já foi decidida.`
+      );
+    }
+    // roundWinnerId relates to round_played_cards.id (see roundsRelations).
+    await this.roundsRepository.update(round.id, {
+      roundWinnerId: winner.id,
+      updatedAt: new Date()
+    });
   }
 
   // Deal a fresh Hand to EVERY Player at room start, including the first Judge —
@@ -732,23 +722,29 @@ export class RoomService implements IRoomService {
   }: {
     roomCode: string;
     cardsPerPlayer: number;
-  }): Promise<Array<{ playerId: string; cards: WhiteCard[] }>> {
+  }): Promise<DealtHand[]> {
     const players = await this.getRoomPlayers(roomCode);
-    const result = [];
+    const result: DealtHand[] = [];
 
     for (const player of players) {
-      const cards = await this.whiteCardDealer.dealWhiteCards(
-        roomCode,
-        cardsPerPlayer
-      );
-
-      await this.updatePlayerInRoom(roomCode, player.id, {
-        cardIds: cards.map(card => card.id)
-      });
-
+      const cards = await this.dealHand(roomCode, player.id, cardsPerPlayer);
       result.push({ playerId: player.id, cards });
     }
 
     return result;
+  }
+
+  // Replace one Player's Hand with `count` fresh cards. Used at start and for a
+  // Player joining mid-game, who would otherwise hold no cards.
+  public async dealHand(
+    roomCode: string,
+    playerId: string,
+    count: number
+  ): Promise<WhiteCard[]> {
+    const cards = await this.whiteCardDealer.dealWhiteCards(roomCode, count);
+    await this.updatePlayerInRoom(roomCode, playerId, {
+      cardIds: cards.map(card => card.id)
+    });
+    return cards;
   }
 }

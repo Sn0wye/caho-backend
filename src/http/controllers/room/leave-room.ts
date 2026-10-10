@@ -21,7 +21,7 @@ export const leaveRoomController = async (app: App) => {
 
       await roomOrchestrator.leaveRoom(roomCode, user.id);
 
-      return res.status(204);
+      return res.status(204).send();
     }
   );
 };

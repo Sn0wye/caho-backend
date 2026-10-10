@@ -40,4 +40,19 @@ describe('getRandomJudge', () => {
       expect(getRandomJudge('prev', players)).toBe('next');
     }
   });
+
+  it('falls back to the outgoing Judge when they are the only active Player', () => {
+    const players = [
+      makePlayer({ id: 'prev', isActive: true }),
+      makePlayer({ id: 'dropped', isActive: false })
+    ];
+
+    expect(getRandomJudge('prev', players)).toBe('prev');
+  });
+
+  it('throws instead of crashing when nobody is active', () => {
+    const players = [makePlayer({ id: 'dropped', isActive: false })];
+
+    expect(() => getRandomJudge(null, players)).toThrow('ativos: 0');
+  });
 });

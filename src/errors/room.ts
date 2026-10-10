@@ -11,5 +11,6 @@ export const ROOM_ERRORS = {
   PLAYER_NOT_FOUND: 'Jogador não encontrado.',
   JUDGE_CANNOT_PLAY: 'O juiz não pode jogar.',
   CARD_NOT_FOUND: 'Ops... Cartas não encontradas.',
-  ROUND_NOT_FOUND: 'Ops... Rodada não encontrada.'
+  ROUND_NOT_FOUND: 'Ops... Rodada não encontrada.',
+  ROOM_FINISHED: 'Ops... Essa partida já terminou.'
 };

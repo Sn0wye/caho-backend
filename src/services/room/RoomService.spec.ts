@@ -1,125 +1,13 @@
-import type { Player, Room, Round, RoundPlayedCard } from '@/schemas';
+import type { Player } from '@/schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  FakeRankingRepository,
-  FakeRoomPlayersRepository,
-  FakeRoomRepository,
-  FakeRoundPlayedCardsRepository,
-  FakeRoundRepository,
-  FakeWhiteCardDealer
-} from './RoomService.fakes';
-import { RoomService } from './RoomService';
-
-const ROOM_CODE = 'ABC123';
-
-function makePlayer(overrides: Partial<Player> = {}): Player {
-  return {
-    id: 'player-1',
-    username: 'player-1',
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isJudge: false,
-    isActive: true,
-    score: 0,
-    cardIds: [],
-    ...overrides
-  };
-}
-
-function makeRoom(overrides: Partial<Room> = {}): Room {
-  return {
-    id: 'room-1',
-    code: ROOM_CODE,
-    maxPlayers: 10,
-    maxPoints: 5,
-    status: 'IN_PROGRESS',
-    hostId: 'player-judge',
-    password: null,
-    isPublic: true,
-    prevJudgeId: null,
-    judgeId: 'player-judge',
-    round: 1,
-    pickedWhiteCards: [],
-    pickedBlackCards: [],
-    currentBlackCardId: 'black-1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides
-  };
-}
-
-function makeRound(overrides: Partial<Round> = {}): Round {
-  return {
-    id: 'round-1',
-    roomCode: ROOM_CODE,
-    roundNumber: 1,
-    blackCardId: 'black-1',
-    judgeId: 'player-judge',
-    roundWinnerId: null,
-    status: 'PLAYING',
-    playDeadline: null,
-    judgeDeadline: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides
-  };
-}
-
-function makePlayedCard(playerId: string): RoundPlayedCard {
-  return {
-    id: `played-${playerId}`,
-    roundId: 'round-1',
-    player: {
-      id: playerId,
-      name: playerId,
-      email: null,
-      username: playerId,
-      password: 'x',
-      avatarUrl: null
-    },
-    whiteCards: [],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
-}
-
-type Fakes = {
-  room: FakeRoomRepository;
-  players: FakeRoomPlayersRepository;
-  ranking: FakeRankingRepository;
-  rounds: FakeRoundRepository;
-  playedCards: FakeRoundPlayedCardsRepository;
-  dealer: FakeWhiteCardDealer;
-};
-
-function buildService(args: {
-  room: Room;
-  players: Player[];
-  rounds: Round[];
-  playedCards: RoundPlayedCard[];
-}): { service: RoomService; fakes: Fakes } {
-  const players = new FakeRoomPlayersRepository(args.players);
-  const fakes: Fakes = {
-    room: new FakeRoomRepository(args.room),
-    players,
-    ranking: new FakeRankingRepository(players),
-    rounds: new FakeRoundRepository(args.rounds),
-    playedCards: new FakeRoundPlayedCardsRepository(args.playedCards),
-    dealer: new FakeWhiteCardDealer()
-  };
-
-  const service = new RoomService(
-    fakes.room,
-    fakes.ranking,
-    fakes.players,
-    fakes.rounds,
-    fakes.playedCards,
-    fakes.dealer
-  );
-
-  return { service, fakes };
-}
+  ROOM_CODE,
+  buildService,
+  makePlayedCard,
+  makePlayer,
+  makeRoom,
+  makeRound
+} from './RoomService.fixtures';
 
 describe('RoomService.processJudgeChooseWinner', () => {
   let judge: Player;
@@ -134,7 +22,7 @@ describe('RoomService.processJudgeChooseWinner', () => {
     const { service } = buildService({
       room: makeRoom({ maxPoints: 5 }),
       players: [judge, winner],
-      rounds: [makeRound()],
+      rounds: [makeRound({ status: 'JUDGING' })],
       playedCards: [makePlayedCard('player-winner')]
     });
 
@@ -151,7 +39,7 @@ describe('RoomService.processJudgeChooseWinner', () => {
     const { service } = buildService({
       room: makeRoom({ maxPoints: 5 }),
       players: [judge, makePlayer({ id: 'player-winner', score: 0 })],
-      rounds: [makeRound()],
+      rounds: [makeRound({ status: 'JUDGING' })],
       playedCards: [makePlayedCard('player-winner')]
     });
 
@@ -169,7 +57,7 @@ describe('RoomService.processJudgeChooseWinner', () => {
     const { service } = buildService({
       room: makeRoom({ maxPoints: 2 }),
       players: [judge, makePlayer({ id: 'player-winner', score: 1 })],
-      rounds: [makeRound()],
+      rounds: [makeRound({ status: 'JUDGING' })],
       playedCards: [makePlayedCard('player-winner')]
     });
 
@@ -244,7 +132,8 @@ describe('RoomService.playCards', () => {
       room: makeRoom(),
       players: [makePlayer({ id: 'player-hand', cardIds: hand })],
       rounds: [makeRound()],
-      playedCards: []
+      playedCards: [],
+      blackCards: [{ id: 'black-1', text: 'pick three', pick: 3, packId: 'p' }]
     });
 
     await service.playCards(ROOM_CODE, 'player-hand', played);

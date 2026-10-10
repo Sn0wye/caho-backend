@@ -11,8 +11,11 @@ import type {
   Room,
   Round,
   RoundPlayedCard,
+  RoundStatus,
   WhiteCard
 } from '@/schemas';
+import type { BlackCard } from '@/repositories/cards';
+import type { IBlackCardDeck } from './IBlackCardDeck';
 import type { IWhiteCardDealer } from './IWhiteCardDealer';
 
 // Named in-memory fakes for RoomService unit tests. They model a single Room so
@@ -35,8 +38,13 @@ export class FakeRoomRepository implements IRoomRepository {
     return [];
   }
 
-  // The real repo keys on code; the maxPoints branch and endGame call with code.
-  async update(_roomCode: string, data: Partial<Room>): Promise<Room> {
+  // The real repo keys on Code and silently updates nothing for any other key.
+  // Mirror that, so a caller passing room.id (the bug that froze round numbers
+  // and Host reassignment) fails here too.
+  async update(roomCode: string, data: Partial<Room>): Promise<Room> {
+    if (roomCode !== this.room.code) {
+      return undefined as unknown as Room;
+    }
     this.room = { ...this.room, ...data };
     return this.room;
   }
@@ -147,6 +155,23 @@ export class FakeRoundRepository implements IRoundRepository {
     this.rounds[index] = { ...this.rounds[index], ...data };
     return this.rounds[index];
   }
+
+  async claimAdvance(
+    id: string,
+    from: RoundStatus | RoundStatus[],
+    to: RoundStatus
+  ): Promise<Round | null> {
+    const allowed = Array.isArray(from) ? from : [from];
+    const round = this.rounds.find(candidate => candidate.id === id);
+    if (!round || !allowed.includes(round.status)) {
+      return null;
+    }
+    return this.update(id, { status: to });
+  }
+
+  all(): Round[] {
+    return [...this.rounds];
+  }
 }
 
 export class FakeRoundPlayedCardsRepository
@@ -154,9 +179,12 @@ export class FakeRoundPlayedCardsRepository
 {
   constructor(private playedCards: RoundPlayedCard[] = []) {}
 
+  public readonly created: CreateRoundPlayedCardDTO[] = [];
+
   async create(
     data: CreateRoundPlayedCardDTO
   ): Promise<Omit<RoundPlayedCard, 'player' | 'whiteCards'>> {
+    this.created.push(data);
     const created = {
       id: `played-${this.playedCards.length + 1}`,
       roundId: data.roundId,
@@ -204,5 +232,27 @@ export class FakeWhiteCardDealer implements IWhiteCardDealer {
         packId: 'fake-pack'
       };
     });
+  }
+}
+
+// Hands out Black Cards in order and records draws; lookups resolve against the
+// seeded pool so a Round's `pick` can be controlled per spec.
+export class FakeBlackCardDeck implements IBlackCardDeck {
+  private drawn = 0;
+
+  constructor(private readonly cards: BlackCard[] = []) {}
+
+  async drawBlackCard(_roomCode: string): Promise<BlackCard> {
+    this.drawn += 1;
+    const card = { id: `black-drawn-${this.drawn}`, text: 'drawn', pick: 1, packId: 'fake-pack' };
+    this.cards.push(card);
+    return card;
+  }
+
+  async findBlackCard(
+    _roomCode: string,
+    id: string
+  ): Promise<BlackCard | undefined> {
+    return this.cards.find(card => card.id === id);
   }
 }

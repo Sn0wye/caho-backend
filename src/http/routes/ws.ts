@@ -1,7 +1,21 @@
 import type { App } from '@/app';
 import { logger } from '@/lib/logger';
 import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+
+// Policy-violation close code: the socket was rejected for auth reasons.
+const WS_POLICY_VIOLATION = 1008;
+
+// The auth plugin's preHandler runs on the upgrade request, so the session
+// cookie resolves here like on any HTTP route. null when unauthenticated.
+const sessionUserId = (req: FastifyRequest): string | null => {
+  try {
+    return req.getUser().id;
+  } catch {
+    return null;
+  }
+};
 
 export const wsRoutes = async (app: App) => {
   const roomOrchestrator = RoomOrchestratorFactory();
@@ -39,6 +53,11 @@ export const wsRoutes = async (app: App) => {
       }
     },
     async (conn, req) => {
+      if (!sessionUserId(req)) {
+        conn.socket.close(WS_POLICY_VIOLATION, 'unauthenticated');
+        return;
+      }
+
       const disconnect = await app.pubsub.subscribe(
         req.params.roomCode,
         message => {
@@ -68,6 +87,14 @@ export const wsRoutes = async (app: App) => {
     },
     async (conn, req) => {
       const { userId } = req.params;
+      // This channel carries the private Hand and drives presence, so only its
+      // owner may open it. Unauthenticated, anyone could read any Player's cards
+      // and mark them inactive by opening and closing a socket.
+      if (sessionUserId(req) !== userId) {
+        conn.socket.close(WS_POLICY_VIOLATION, 'forbidden');
+        return;
+      }
+
       const disconnect = await app.pubsub.subscribe(userId, message => {
         conn.socket.send(JSON.stringify(message));
       });

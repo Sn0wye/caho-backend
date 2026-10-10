@@ -4,6 +4,7 @@ import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
 import type { RoundPlayedCard } from '@/schemas';
 import { roundPlayedCards, roundPlayedCardWhiteCards } from '@/db/schema';
 import { createId } from '@paralleldrive/cuid2';
+import { asc } from 'drizzle-orm';
 
 export class RoundPlayedCardsRepository implements IRoundPlayedCardsRepository {
   private readonly db = db;
@@ -23,10 +24,10 @@ export class RoundPlayedCardsRepository implements IRoundPlayedCardsRepository {
     if (!inserted) throw new Error('Failed to create round played card');
 
     await this.db.insert(roundPlayedCardWhiteCards).values(
-      data.whiteCardIds.map(whiteCardId => ({
-        id: createId(),
+      data.whiteCardIds.map((whiteCardId, position) => ({
         roundPlayedCardId: inserted.id,
-        whiteCardId
+        whiteCardId,
+        position
       }))
     );
 
@@ -53,8 +54,10 @@ export class RoundPlayedCardsRepository implements IRoundPlayedCardsRepository {
       where: (roundPlayedCards, { eq }) =>
         eq(roundPlayedCards.roundId, round.id),
       with: {
-        player: true,
+        // Only the public fields: these payloads are broadcast to the Room.
+        player: { columns: { id: true, username: true, avatarUrl: true } },
         whiteCards: {
+          orderBy: pivot => [asc(pivot.position)],
           with: {
             whiteCard: true
           }

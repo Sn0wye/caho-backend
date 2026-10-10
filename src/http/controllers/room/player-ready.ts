@@ -18,11 +18,14 @@ export const playerReadyController = async (app: App) => {
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async req => {
+    async (req, res) => {
       const userId = req.getUser().id;
       const { roomCode } = req.params;
 
       await roundFlow.playerReady(roomCode, userId);
+
+      // An async handler resolving undefined never replies in Fastify 4.
+      return res.status(204).send();
     }
   );
 };

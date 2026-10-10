@@ -1,6 +1,5 @@
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
 import { toRoomPlayer } from '@/schemas';
-import { BadRequestError } from '@/errors';
 import type { IRoundClock } from './IRoundClock';
 import type { IRoundFlowService } from './IRoundFlowService';
 
@@ -26,26 +25,14 @@ export class RoundFlow {
     playerId: string,
     playedCardIds: string[]
   ): Promise<void> {
-    const player = await this.rooms.getPlayerFromRoom(roomCode, playerId);
-    if (!player) {
-      throw new BadRequestError(
-        'Você não pode jogar cartas em uma sala que não está jogando :L'
-      );
-    }
-    if (player.isReady) {
-      throw new BadRequestError('Você já jogou nessa rodada :L');
-    }
-    if (!playedCardIds.length) {
-      throw new BadRequestError('Você precisa jogar pelo menos uma carta.');
-    }
-
-    const cardsDrawn = await this.rooms.playCards(
+    // The play rules (phase, Judge, Hand, pick count) are enforced in the domain
+    // step; it returns the Player as stored after the play.
+    const { player, cardsDrawn } = await this.rooms.playCards(
       roomCode,
       playerId,
       playedCardIds
     );
 
-    player.isReady = true;
     await this.publisher.publish(roomCode, {
       event: 'room.player-update',
       payload: toRoomPlayer(player)
@@ -73,8 +60,8 @@ export class RoundFlow {
     await this.clock.advanceToJudging(round, plays);
   }
 
-  // The Judge picks a winner: score the winner, broadcast the round end and the
-  // winner's new score, then either end the game (win-condition) or start the next
+  // The Judge picks a winner: score the winner, broadcast the round end carrying
+  // the winner's new score, then either end the game (win-condition) or start the next
   // Round and arm its play clock. issue #1 / #4 / ADR-0004.
   public async judgePick(
     roomCode: string,
@@ -127,13 +114,10 @@ export class RoundFlow {
     });
   }
 
-  // Toggle a Player's ready flag in the lobby and broadcast the change.
+  // Toggle a Player's ready flag in the lobby and broadcast the change. The
+  // domain step rejects it outside LOBBY.
   public async playerReady(roomCode: string, playerId: string): Promise<void> {
-    const player = await this.rooms.getPlayerFromRoom(roomCode, playerId);
-    const isReady = !player.isReady;
-
-    await this.rooms.updatePlayerInRoom(roomCode, playerId, { isReady });
-    player.isReady = isReady;
+    const player = await this.rooms.togglePlayerReady(roomCode, playerId);
 
     await this.publisher.publish(roomCode, {
       event: 'room.player-update',

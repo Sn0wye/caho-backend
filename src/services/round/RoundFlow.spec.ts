@@ -10,7 +10,6 @@ import type {
   WhiteCard
 } from '@/schemas';
 import type { JudgePickResult } from '@/services/room/IRoomService';
-import { BadRequestError } from '@/errors';
 import { describe, expect, it } from 'vitest';
 import {
   FakeGameEventPublisher,
@@ -101,10 +100,7 @@ function makePlayedCard(winnerId: string): RoundPlayedCard {
     roundId: 'round-2',
     player: {
       id: winnerId,
-      name: winnerId,
-      email: null,
       username: winnerId,
-      password: 'x',
       avatarUrl: null
     },
     whiteCards: [WHITE_CARD],
@@ -198,21 +194,6 @@ describe('RoundFlow.playCards', () => {
     expect(clock.advanced).toEqual([{ round, plays }]);
   });
 
-  it('rejects a second play in the same Round', async () => {
-    const { flow } = buildFlow({ player: makePlayer({ isReady: true }) });
-
-    await expect(flow.playCards(ROOM_CODE, PLAYER_ID, ['c1'])).rejects.toThrow(
-      BadRequestError
-    );
-  });
-
-  it('rejects an empty play', async () => {
-    const { flow } = buildFlow({ player: makePlayer() });
-
-    await expect(flow.playCards(ROOM_CODE, PLAYER_ID, [])).rejects.toThrow(
-      'Você precisa jogar pelo menos uma carta.'
-    );
-  });
 });
 
 describe('RoundFlow.judgePick', () => {
@@ -279,8 +260,8 @@ describe('RoundFlow.playerReady', () => {
 
     await flow.playerReady(ROOM_CODE, PLAYER_ID);
 
-    expect(rooms.updatePlayerCalls).toEqual([
-      { roomCode: ROOM_CODE, playerId: PLAYER_ID, payload: { isReady: true } }
+    expect(rooms.readyToggles).toEqual([
+      { roomCode: ROOM_CODE, playerId: PLAYER_ID }
     ]);
     expect(publisher.published).toEqual([
       {

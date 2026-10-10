@@ -21,32 +21,47 @@ export class CardService {
     return room;
   }
 
+  // Draws `count` unseen White Cards. When the pool runs dry the ledger
+  // restarts so a long game keeps dealing; recycled cards may repeat ones still
+  // held in another Hand, which is harmless (plays are per Player).
   public async getNewWhiteCards(count = 1): Promise<WhiteCard[]> {
     const room = await this.getRoom();
-    const cards = await this.cardRepository.drawWhiteCards({
+    const fresh = await this.cardRepository.drawWhiteCards({
       count,
       excludeIds: room.pickedWhiteCards
     });
+    const recycled = fresh.length < count
+      ? await this.cardRepository.drawWhiteCards({
+          count: count - fresh.length,
+          excludeIds: fresh.map(c => c.id)
+        })
+      : [];
 
-    await this.roomRepository.update(this.roomCode, {
-      pickedWhiteCards: [...room.pickedWhiteCards, ...cards.map(c => c.id)]
-    });
+    const drawnIds = [...fresh, ...recycled].map(c => c.id);
+    const ledger = recycled.length > 0 ? drawnIds : [...room.pickedWhiteCards, ...drawnIds];
+    await this.roomRepository.update(this.roomCode, { pickedWhiteCards: ledger });
 
-    return cards;
+    return [...fresh, ...recycled];
   }
 
+  // Draws an unseen Black Card, reshuffling the discards (all but the current
+  // card) once every card has been shown. The base pack has ~117, fewer than a
+  // long many-Player game needs; this used to throw and wedge the Room.
   public async getNewBlackCard(): Promise<BlackCard> {
     const room = await this.getRoom();
-    const card = await this.cardRepository.drawBlackCard({
+    const fresh = await this.cardRepository.drawBlackCard({
       excludeIds: room.pickedBlackCards
     });
+    const card = fresh ?? (await this.cardRepository.drawBlackCard({
+      excludeIds: room.currentBlackCardId ? [room.currentBlackCardId] : []
+    }));
 
     if (!card) {
       throw new Error(`No Black Card left to draw for Room: ${this.roomCode}`);
     }
 
     await this.roomRepository.update(this.roomCode, {
-      pickedBlackCards: [...room.pickedBlackCards, card.id],
+      pickedBlackCards: fresh ? [...room.pickedBlackCards, card.id] : [card.id],
       currentBlackCardId: card.id
     });
 

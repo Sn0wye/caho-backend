@@ -10,3 +10,13 @@ export const userSchema = z.object({
 });
 
 export type UserSchema = z.infer<typeof userSchema>;
+
+// The broadcastable slice of a User. Played Cards go to the whole Room, and the
+// full row used to ship each Player's password hash and email with them.
+export const publicUserSchema = userSchema.pick({
+  id: true,
+  username: true,
+  avatarUrl: true
+});
+
+export type PublicUser = z.infer<typeof publicUserSchema>;
