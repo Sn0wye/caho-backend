@@ -9,5 +9,6 @@ const client = new pg.Pool({
 
 export const db = drizzle(client, {
   schema,
-  logger: true
+  // Query serialization and stdout writes add work to every production request.
+  logger: env.NODE_ENV !== 'production'
 });

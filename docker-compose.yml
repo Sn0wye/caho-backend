@@ -8,16 +8,22 @@ services:
     container_name: caho-redis
     restart: always
     ports:
-      - '6379:6379'
+      - "6379:6379"
     environment:
       REDIS_PASSWORD: caho
     # Expired-key events drive the Round timers (ADR-0003).
     command:
-      ['redis-server', '--requirepass', 'caho', '--notify-keyspace-events', 'Ex']
+      [
+        "redis-server",
+        "--requirepass",
+        "caho",
+        "--notify-keyspace-events",
+        "Ex",
+      ]
     networks:
       - caho
     healthcheck:
-      test: ['CMD', 'redis-cli', '-a', 'caho', 'ping']
+      test: ["CMD", "redis-cli", "-a", "caho", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,14 +36,14 @@ services:
       POSTGRES_USER: caho
       POSTGRES_PASSWORD: caho
     ports:
-      - '5432:5432'
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     networks:
       - caho
     healthcheck:
-      test: ['CMD', 'pg_isready', '-U', 'caho']
+      test: ["CMD", "pg_isready", "-U", "caho"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,7 +56,7 @@ services:
       ACCEPT_EULA: Y
       SEQ_FIRSTRUN_ADMINPASSWORD: caho
     ports:
-      - '5341:80'
+      - "5341:80"
     volumes:
       - seq_data:/data
     networks:
@@ -64,8 +70,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ['node', 'dist/migrate.js']
-    restart: 'no'
+    command: ["node", "dist/migrate.js"]
+    restart: "no"
     env_file: ./.env.docker
     networks:
       - caho
@@ -80,11 +86,13 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # The caho-migrate dependency already completed database setup.
+    command: ["node", "dist/server.js"]
     env_file: ./.env.docker
     environment:
       SEQ_URL: http://caho-seq:5341
     ports:
-      - '8080:8080'
+      - "8080:8080"
     networks:
       - caho
     depends_on:
