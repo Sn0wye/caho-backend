@@ -30,12 +30,21 @@ export const updateProfileController = async (app: App) => {
       const { username, email, avatarUrl } = req.body;
 
       const existingUser = await db.query.users.findFirst({
-        where: (users, { or, eq }) =>
-          or(eq(users.username, username), eq(users.email, email))
+        where: (users, { and, eq, ne, or }) =>
+          and(
+            ne(users.id, user.id),
+            email
+              ? or(eq(users.username, username), eq(users.email, email))
+              : eq(users.username, username)
+          )
       });
 
-      if (existingUser && existingUser.id !== user.id) {
-        throw new BadRequestError('Username or email already taken');
+      if (existingUser) {
+        throw new BadRequestError(
+          existingUser.username === username
+            ? 'Esse nome de usuário já está em uso.'
+            : 'Esse email já está em uso.'
+        );
       }
 
       const updatedUser = (
