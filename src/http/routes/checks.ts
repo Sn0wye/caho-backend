@@ -1,8 +1,10 @@
+import { FailureLogWindow } from '@/observability/failure-log-window';
 import { sql } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 export const checkRoutes = async (app: FastifyInstance) => {
+  const failures = new FailureLogWindow(Date.now);
   app.get(
     '/readyz',
     {
@@ -38,20 +40,16 @@ export const checkRoutes = async (app: FastifyInstance) => {
 
       try {
         await app.db.execute(sql`SELECT 1`);
+        readinessRecovered(req.log, 'postgres', failures);
       } catch (err) {
-        req.log.error(
-          { event: 'health.dependency_failed', dependency: 'postgres', err },
-          'Readiness dependency failed'
-        );
+        readinessFailure(req.log, 'postgres', err, failures);
         healthStatus.db = false;
       }
       try {
         await app.redis.ping();
+        readinessRecovered(req.log, 'redis', failures);
       } catch (err) {
-        req.log.error(
-          { event: 'health.dependency_failed', dependency: 'redis', err },
-          'Readiness dependency failed'
-        );
+        readinessFailure(req.log, 'redis', err, failures);
         healthStatus.redis = false;
       }
       const ready = healthStatus.db && healthStatus.redis;
@@ -62,3 +60,30 @@ export const checkRoutes = async (app: FastifyInstance) => {
     }
   );
 };
+
+function readinessFailure(
+  log: FastifyBaseLogger,
+  dependency: string,
+  err: unknown,
+  failures: FailureLogWindow
+): void {
+  const suppressedCount = failures.allow(dependency);
+  if (suppressedCount === null) return;
+  log.error(
+    { event: 'health.dependency_failed', dependency, err, suppressedCount },
+    'Readiness dependency failed'
+  );
+}
+
+function readinessRecovered(
+  log: FastifyBaseLogger,
+  dependency: string,
+  failures: FailureLogWindow
+): void {
+  const suppressedCount = failures.recover(dependency);
+  if (suppressedCount === null) return;
+  log.info(
+    { event: 'health.dependency_recovered', dependency, suppressedCount },
+    'Readiness dependency recovered'
+  );
+}

@@ -13,9 +13,9 @@ const telemetry = buildTelemetry(
     serviceVersion: logSettings.serviceVersion,
     environment: env.NODE_ENV
   },
-  () =>
+  suppressedCount =>
     telemetryConsoleLogger.error(
-      { event: 'telemetry.export_failed' },
+      { event: 'telemetry.export_failed', suppressedCount },
       'Trace export failed; check OTLP endpoint and ingest credentials'
     )
 );

@@ -2,6 +2,7 @@ import type { Attributes } from '@opentelemetry/api';
 import type { ExportResult } from '@opentelemetry/core';
 import { ExportResultCode } from '@opentelemetry/core';
 import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
+import { FailureLogWindow } from './failure-log-window';
 
 const PRIVATE_ATTRIBUTES =
   /^(db\.(statement|query\.text|connection_string|user|redis\.)|db\.postgresql\.values|http\.(url|target|request\.header|response\.header)|url\.(full|query)|.*(password|token|cookie|authorization))/i;
@@ -61,7 +62,8 @@ function safeSpan(span: ReadableSpan): ReadableSpan {
 export class SafeSpanExporter implements SpanExporter {
   constructor(
     private readonly exporter: SpanExporter,
-    private readonly onFailure: () => void
+    private readonly onFailure: (suppressedCount: number) => void,
+    private readonly failures: FailureLogWindow = new FailureLogWindow(Date.now)
   ) {}
 
   export(
@@ -69,7 +71,10 @@ export class SafeSpanExporter implements SpanExporter {
     callback: (result: ExportResult) => void
   ): void {
     this.exporter.export(spans.map(safeSpan), result => {
-      if (result.code === ExportResultCode.FAILED) this.onFailure();
+      if (result.code === ExportResultCode.FAILED) {
+        const suppressedCount = this.failures.allow('export');
+        if (suppressedCount !== null) this.onFailure(suppressedCount);
+      } else this.failures.recover('export');
       callback(result);
     });
   }

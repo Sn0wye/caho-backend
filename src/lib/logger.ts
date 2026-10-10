@@ -1,4 +1,5 @@
 import { env } from '@/env';
+import { FailureLogWindow } from '@/observability/failure-log-window';
 import { activeTraceFields } from '@/observability/trace-context';
 import pino from 'pino';
 import { createStream } from 'pino-seq';
@@ -90,14 +91,18 @@ function optionalSeqStream(
   consoleLogger: pino.Logger
 ): SeqStream | null {
   if (!seqUrl) return null;
+  const failures = new FailureLogWindow(Date.now);
   return createStream({
     serverUrl: seqUrl,
     apiKey: seqApiKey,
-    onError: () =>
+    onError: () => {
+      const suppressedCount = failures.allow('seq');
+      if (suppressedCount === null) return;
       consoleLogger.error(
-        { event: 'seq.export_failed' },
+        { event: 'seq.export_failed', suppressedCount },
         'Seq log export failed; check endpoint and ingest credentials'
-      )
+      );
+    }
   });
 }
 

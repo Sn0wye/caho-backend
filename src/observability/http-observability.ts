@@ -9,6 +9,7 @@ import {
   trace
 } from '@opentelemetry/api';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { FailureLogWindow } from './failure-log-window';
 
 const requestSpans = new WeakMap<FastifyRequest, Span>();
 const requestStartTimes = new WeakMap<FastifyRequest, number>();
@@ -27,6 +28,7 @@ interface RequestCompletionFields {
   statusCode: number;
   durationMs: number;
   roomCode?: string;
+  suppressedCount?: number;
 }
 
 function requestRoomCode(request: FastifyRequest): string | undefined {
@@ -54,13 +56,34 @@ function requestCompletionFields(
 function writeRequestSummary(
   request: FastifyRequest,
   statusCode: number,
-  durationMs: number
+  durationMs: number,
+  failures?: FailureLogWindow
 ): void {
+  const suppressedCount = healthSummaryDue(request, statusCode, failures);
+  if (suppressedCount === null) return;
   const fields = requestCompletionFields(request, statusCode, durationMs);
+  if (HEALTH_ROUTES.has(fields.route)) fields.suppressedCount = suppressedCount;
   if (statusCode >= 500) request.log.error(fields, 'HTTP request failed');
   else if (statusCode >= 400) request.log.warn(fields, 'HTTP request rejected');
   else if (!HEALTH_ROUTES.has(requestRoute(request)))
     request.log.info(fields, 'HTTP request completed');
+}
+
+function healthSummaryDue(
+  request: FastifyRequest,
+  statusCode: number,
+  failures?: FailureLogWindow
+): number | null {
+  const route = requestRoute(request);
+  if (!HEALTH_ROUTES.has(route)) return 0;
+  if (statusCode >= 400) return failures ? failures.allow(route) : 0;
+  const suppressedCount = failures?.recover(route);
+  if (suppressedCount !== null && suppressedCount !== undefined)
+    request.log.info(
+      { event: 'http.health_recovered', route, suppressedCount },
+      'Health endpoint recovered'
+    );
+  return null;
 }
 
 function endRequestSpan(request: FastifyRequest, statusCode: number): void {
@@ -72,10 +95,14 @@ function endRequestSpan(request: FastifyRequest, statusCode: number): void {
   requestStartTimes.delete(request);
 }
 
-function completeRequest(request: FastifyRequest, reply: FastifyReply): void {
+function completeRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  failures: FailureLogWindow
+): void {
   if (completedRequests.has(request)) return;
   completedRequests.add(request);
-  writeRequestSummary(request, reply.statusCode, reply.elapsedTime);
+  writeRequestSummary(request, reply.statusCode, reply.elapsedTime, failures);
   endRequestSpan(request, reply.statusCode);
 }
 
@@ -105,7 +132,7 @@ export function installHttpObservability(app: Pick<App, 'addHook'>): void {
     reply.header('x-request-id', request.id);
     context.with(requestContext, done);
   });
-  installRequestCompletion(app);
+  installRequestCompletion(app, new FailureLogWindow(Date.now));
 }
 
 /** End the HTTP span when Fastify hijacks a WS upgrade. Example: completeSocketUpgrade(request). */
@@ -118,9 +145,12 @@ export function completeSocketUpgrade(request: FastifyRequest): void {
   endRequestSpan(request, 101);
 }
 
-function installRequestCompletion(app: Pick<App, 'addHook'>): void {
+function installRequestCompletion(
+  app: Pick<App, 'addHook'>,
+  failures: FailureLogWindow
+): void {
   app.addHook('onResponse', async (request, reply) =>
-    completeRequest(request, reply)
+    completeRequest(request, reply, failures)
   );
   app.addHook('onRequestAbort', async request => {
     request.log.warn(

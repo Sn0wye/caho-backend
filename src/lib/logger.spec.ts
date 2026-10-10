@@ -1,9 +1,13 @@
 import { traceOperation } from '@/observability/operations';
 import { TelemetryTestHarness } from '@/observability/telemetry.fakes';
 import type { PinoSeqStreamConfig } from 'pino-seq';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildLogger } from './logger';
 import { FakeConsoleOutput, FakeSeqOutput } from './logger.fakes';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 vi.mock('pino-seq', async () => {
   const { FakeSeqOutput } = await import('./logger.fakes');
@@ -149,6 +153,21 @@ describe('logging policy', () => {
     const fake = seqStream as unknown as FakeSeqOutput;
     fake.config.onError?.(new Error('private-api-key'));
     expect(JSON.parse(output.lines[0]).event).toBe('seq.export_failed');
+    expect(output.lines.join('')).not.toContain('private-api-key');
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('bounds console-only export failures and reports suppressed repeat counts', () => {
+    vi.useFakeTimers();
+    const output = new FakeConsoleOutput();
+    const { seqStream } = buildLogger('http://seq:80', true, output);
+    const fake = seqStream as unknown as FakeSeqOutput;
+    for (let index = 0; index < 100; index++)
+      fake.config.onError?.(new Error('private-api-key'));
+    expect(output.lines).toHaveLength(1);
+    vi.advanceTimersByTime(30000);
+    fake.config.onError?.(new Error('private-api-key'));
+    expect(JSON.parse(output.lines[1]).suppressedCount).toBe(99);
     expect(output.lines.join('')).not.toContain('private-api-key');
     expect(fake.lines).toHaveLength(0);
   });

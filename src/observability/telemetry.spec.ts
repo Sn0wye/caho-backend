@@ -1,5 +1,6 @@
 import { trace } from '@opentelemetry/api';
 import { afterEach, describe, expect, it } from 'vitest';
+import { FailureLogWindow } from './failure-log-window';
 import { SafeSpanExporter } from './safe-span-exporter';
 import {
   type TelemetrySettings,
@@ -101,5 +102,31 @@ describe('safe trace export', () => {
     });
     expect(failures).toBe(1);
     expect(resultCode).toBe(1);
+  });
+
+  it('bounds failure reports while completing every batch and resets after success', () => {
+    const fake = new FakeSpanExporter();
+    const reports: number[] = [];
+    let timestamp = 0;
+    let callbacks = 0;
+    const exporter = new SafeSpanExporter(
+      fake,
+      count => reports.push(count),
+      new FailureLogWindow(() => timestamp)
+    );
+    fake.fail = true;
+    for (let index = 0; index < 100; index++)
+      exporter.export([], () => callbacks++);
+    expect(reports).toEqual([0]);
+    expect(callbacks).toBe(100);
+    timestamp = 30000;
+    exporter.export([], () => callbacks++);
+    expect(reports).toEqual([0, 99]);
+    fake.fail = false;
+    exporter.export([], () => callbacks++);
+    fake.fail = true;
+    exporter.export([], () => callbacks++);
+    expect(reports).toEqual([0, 99, 0]);
+    expect(callbacks).toBe(103);
   });
 });

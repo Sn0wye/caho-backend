@@ -55,7 +55,7 @@ function dependencyInstrumentations(
 function seqSpanProcessor(
   settings: TelemetrySettings,
   endpoint: string,
-  onFailure: () => void
+  onFailure: (suppressedCount: number) => void
 ): BatchSpanProcessor {
   // An override may point at a collector: never forward Seq credentials there.
   const headers =
@@ -76,7 +76,7 @@ function seqSpanProcessor(
 /** Build one traces-only SDK before app imports. Example: buildTelemetry(settings, reportExportFailure). */
 export function buildTelemetry(
   settings: TelemetrySettings,
-  onFailure: () => void
+  onFailure: (suppressedCount: number) => void
 ): NodeSDK | null {
   const endpoint = settings.tracesEndpoint ?? seqTraceEndpoint(settings.seqUrl);
   if (settings.disabled || !endpoint) return null;
