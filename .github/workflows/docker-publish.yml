@@ -6,15 +6,13 @@ on:
       - main
     paths:
       - "src/**"
+      - "!src/**/*.spec.ts"
       - "migrations/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "tsconfig.json"
       - "tsup.config.ts"
-      - "vitest.config.ts"
-      - "vitest.setup.ts"
-      - ".env.test"
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/docker-publish.yml"
