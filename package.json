@@ -16,6 +16,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
+    "db:seed": "dotenv tsx scripts/seed.ts",
+    "db:setup": "dotenv tsx src/migrate.ts",
     "typecheck": "tsc --noEmit",
     "clean": "git clean -xdf node_modules",
     "check": "biome check .",
