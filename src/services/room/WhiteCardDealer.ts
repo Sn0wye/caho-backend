@@ -1,12 +1,19 @@
+import type { IGameStore } from '@/repositories/game-store/IGameStore';
 import type { WhiteCard } from '@/schemas';
-import { CardServiceFactory } from '../CardServiceFactory';
+import { CardService } from '../CardService';
 import type { IWhiteCardDealer } from './IWhiteCardDealer';
 
-// Production dealer: draws fresh White Cards from the DB-backed pool for a Room,
-// delegating de-dup/picked-card bookkeeping to CardService. See issues #1, #5.
+// Draws fresh White Cards from the store's card pool for a Room, delegating
+// de-dup/picked-card bookkeeping to CardService. See issues #1, #5, #24.
 export class WhiteCardDealer implements IWhiteCardDealer {
+  constructor(private readonly store: Pick<IGameStore, 'cards' | 'rooms'>) {}
+
   async dealWhiteCards(roomCode: string, count: number): Promise<WhiteCard[]> {
-    const cardService = CardServiceFactory(roomCode);
+    const cardService = new CardService(
+      roomCode,
+      this.store.cards,
+      this.store.rooms
+    );
     return cardService.getNewWhiteCards(count);
   }
 }

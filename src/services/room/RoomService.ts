@@ -6,9 +6,7 @@ import {
   NotFoundError
 } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
-import type { IRankingRepository } from '@/repositories/ranking';
-import type { IRoomRepository } from '@/repositories/room';
-import type { IRoomPlayersRepository } from '@/repositories/room-players';
+import type { IGameStore } from '@/repositories/game-store/IGameStore';
 import { generateCode } from '@/utils/generateCode';
 import type {
   Player,
@@ -35,8 +33,6 @@ import type { CreateRoomDTO } from '@/dto/CreateRoom';
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
 import { CardServiceFactory } from '../CardServiceFactory';
-import type { IRoundRepository } from '@/repositories/round';
-import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import { getRandomJudge } from '@/utils/getRandomJudge';
 import { assertPlayableCards } from '@/services/round/assertPlayableCards';
 import type { IWhiteCardDealer } from './IWhiteCardDealer';
@@ -45,17 +41,13 @@ import { HAND_SIZE, assertRoomCanStart } from './gameRules';
 
 export class RoomService implements IRoomService {
   constructor(
-    private readonly roomRepository: IRoomRepository,
-    private readonly rankingRepository: IRankingRepository,
-    private readonly roomPlayersRepository: IRoomPlayersRepository,
-    private readonly roundsRepository: IRoundRepository,
-    private readonly roundPlayedCardsRepository: IRoundPlayedCardsRepository,
+    private readonly store: IGameStore,
     private readonly whiteCardDealer: IWhiteCardDealer,
     private readonly blackCardDeck: IBlackCardDeck
   ) {}
 
   public async getRoom(roomCode: string): Promise<Room> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
+    const room = await this.store.rooms.getRoomByCode(roomCode);
 
     if (!room) {
       throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
@@ -66,7 +58,7 @@ export class RoomService implements IRoomService {
 
   public async createRoom(data: CreateRoomDTO): Promise<Room> {
     try {
-      const room = await this.roomRepository.create({
+      const room = await this.store.rooms.create({
         id: createId(),
         status: 'LOBBY',
         code: generateCode(),
@@ -92,7 +84,7 @@ export class RoomService implements IRoomService {
   }
 
   public async listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]> {
-    return await this.roomRepository.listPublicRooms();
+    return await this.store.rooms.listPublicRooms();
   }
 
   public async addPlayerToRoom({
@@ -105,7 +97,7 @@ export class RoomService implements IRoomService {
     await this.getRoom(roomCode);
 
     try {
-      return await this.roomPlayersRepository.addPlayerToRoom({
+      return await this.store.players.addPlayerToRoom({
         roomCode,
         player
       });
@@ -126,13 +118,13 @@ export class RoomService implements IRoomService {
   ): Promise<GameStart> {
     const room = await this.getRoom(roomCode);
     const players =
-      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+      await this.store.players.getRoomPlayersByCode(roomCode);
     assertRoomCanStart(room, players, requesterId);
 
     const judgeId = getRandomJudge(null, players);
     const blackCard = await this.blackCardDeck.drawBlackCard(roomCode);
-    await this.roomPlayersRepository.setPlayersAsUnready(roomCode);
-    const startedRoom = await this.roomRepository.update(roomCode, {
+    await this.store.players.setPlayersAsUnready(roomCode);
+    const startedRoom = await this.store.rooms.update(roomCode, {
       status: 'IN_PROGRESS',
       round: 1,
       judgeId,
@@ -152,7 +144,7 @@ export class RoomService implements IRoomService {
       roundWinnerId: null
     });
     const startedPlayers =
-      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+      await this.store.players.getRoomPlayersByCode(roomCode);
 
     return {
       room: startedRoom,
@@ -169,12 +161,12 @@ export class RoomService implements IRoomService {
   public async endGame(roomCode: string): Promise<Ranking> {
     try {
       await this.abortActiveRound(roomCode);
-      await this.roomRepository.update(roomCode, {
+      await this.store.rooms.update(roomCode, {
         status: 'FINISHED'
       });
 
       const ranking =
-        await this.rankingRepository.getRankingByRoomCode(roomCode);
+        await this.store.ranking.getRankingByRoomCode(roomCode);
 
       return ranking;
     } catch (error) {
@@ -188,14 +180,14 @@ export class RoomService implements IRoomService {
   // (their claims need PLAYING/JUDGING). Without this a finished game kept
   // rotating Rounds when the timers fired. ADR-0003.
   private async abortActiveRound(roomCode: string): Promise<void> {
-    const room = await this.roomRepository.getRoomByCode(roomCode);
+    const room = await this.store.rooms.getRoomByCode(roomCode);
     const round = room
-      ? await this.roundsRepository.find(roomCode, room.round)
+      ? await this.store.rounds.find(roomCode, room.round)
       : null;
     if (!round) {
       return;
     }
-    await this.roundsRepository.claimAdvance(
+    await this.store.rounds.claimAdvance(
       round.id,
       ['PLAYING', 'JUDGING'],
       'ABORTED'
@@ -210,7 +202,7 @@ export class RoomService implements IRoomService {
 
       player.isHost = room.hostId === player.id;
       const players =
-        await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+        await this.store.players.getRoomPlayersByCode(roomCode);
 
       this.assertCanJoin(room, players, player.id, password);
       await this.addPlayerToRoom({ player, roomCode });
@@ -255,7 +247,7 @@ export class RoomService implements IRoomService {
     try {
       // An explicit Leave removes the Player entirely. A connection drop is the
       // separate path that keeps them as an Inactive Player. See ADR-0002.
-      await this.roomPlayersRepository.deletePlayerFromRoom(roomCode, playerId);
+      await this.store.players.deletePlayerFromRoom(roomCode, playerId);
     } catch (error) {
       throw new InternalServerError('Erro ao sair da sala.', { cause: error });
     }
@@ -264,7 +256,7 @@ export class RoomService implements IRoomService {
   // Rooms the Player currently belongs to. The per-user WebSocket only knows a
   // userId, so presence updates use this to find which Rooms to broadcast to.
   public async getPlayerRoomCodes(playerId: string): Promise<string[]> {
-    return await this.roomPlayersRepository.getRoomCodesByPlayerId(playerId);
+    return await this.store.players.getRoomCodesByPlayerId(playerId);
   }
 
   // A Host who Leaves or drops is handled by Room status, not one flat rule
@@ -296,7 +288,7 @@ export class RoomService implements IRoomService {
     room: Room,
     departingPlayerId: string
   ): Promise<HostLossOutcome> {
-    const players = await this.roomPlayersRepository.getRoomPlayersByCode(
+    const players = await this.store.players.getRoomPlayersByCode(
       room.code
     );
     const heir = players.find(
@@ -310,7 +302,7 @@ export class RoomService implements IRoomService {
 
     // The repository keys Rooms by Code; passing room.id here silently updated
     // nothing, so the Host was never actually reassigned.
-    await this.roomRepository.update(room.code, { hostId: heir.id });
+    await this.store.rooms.update(room.code, { hostId: heir.id });
     await this.clearDepartedHostFlag(room.code, departingPlayerId);
 
     const newHost = await this.updatePlayerInRoom(room.code, heir.id, {
@@ -326,12 +318,12 @@ export class RoomService implements IRoomService {
     roomCode: string,
     playerId: string
   ): Promise<void> {
-    const departing = await this.roomPlayersRepository.getPlayerFromRoom(
+    const departing = await this.store.players.getPlayerFromRoom(
       roomCode,
       playerId
     );
     if (departing) {
-      await this.roomPlayersRepository.updatePlayerInRoom(roomCode, playerId, {
+      await this.store.players.updatePlayerInRoom(roomCode, playerId, {
         isHost: false
       });
     }
@@ -371,7 +363,7 @@ export class RoomService implements IRoomService {
   // Players are never awaited, so they are excluded from the count. See ADR-0002.
   public async allActivePlayersPlayed(roomCode: string): Promise<boolean> {
     const players =
-      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+      await this.store.players.getRoomPlayersByCode(roomCode);
     const contenders = players.filter(
       player => player.isActive && !player.isJudge
     );
@@ -384,7 +376,7 @@ export class RoomService implements IRoomService {
 
     try {
       const players =
-        await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+        await this.store.players.getRoomPlayersByCode(roomCode);
       return players;
     } catch (error) {
       throw new InternalServerError('Erro ao buscar jogadores da sala.', {
@@ -405,7 +397,7 @@ export class RoomService implements IRoomService {
   ): Promise<Player> {
     try {
       // TODO: improve this to return the updated player
-      await this.roomPlayersRepository.updatePlayerInRoom(
+      await this.store.players.updatePlayerInRoom(
         roomCode,
         playerId,
         payload
@@ -423,7 +415,7 @@ export class RoomService implements IRoomService {
     roomCode: string,
     playerId: string
   ): Promise<Player> {
-    const player = await this.roomPlayersRepository.getPlayerFromRoom(
+    const player = await this.store.players.getPlayerFromRoom(
       roomCode,
       playerId
     );
@@ -442,7 +434,7 @@ export class RoomService implements IRoomService {
     by: number;
   }): Promise<void> {
     try {
-      return await this.roomPlayersRepository.incrementPlayerScore(input);
+      return await this.store.players.incrementPlayerScore(input);
     } catch (error) {
       throw new InternalServerError(
         'Erro ao incrementar pontuação do jogador.',
@@ -456,7 +448,7 @@ export class RoomService implements IRoomService {
     data: Partial<Room>
   ): Promise<Room> {
     try {
-      return await this.roomRepository.update(roomCode, data);
+      return await this.store.rooms.update(roomCode, data);
     } catch (error) {
       throw new InternalServerError('Erro ao atualizar sala.', {
         cause: error
@@ -502,7 +494,7 @@ export class RoomService implements IRoomService {
       pick: blackCard?.pick ?? 1
     });
 
-    await this.roundPlayedCardsRepository.create({
+    await this.store.playedCards.create({
       playerId: player.id,
       roundId: round.id,
       whiteCardIds: playedCardIds
@@ -530,7 +522,7 @@ export class RoomService implements IRoomService {
       .filter(cardId => !playedCardIds.includes(cardId))
       .concat(newWhiteCards.map(card => card.id));
 
-    await this.roomPlayersRepository.updatePlayerInRoom(roomCode, player.id, {
+    await this.store.players.updatePlayerInRoom(roomCode, player.id, {
       cardIds,
       isReady: true
     });
@@ -547,7 +539,7 @@ export class RoomService implements IRoomService {
       );
     }
 
-    const round = await this.roundsRepository.find(roomCode, room.round);
+    const round = await this.store.rounds.find(roomCode, room.round);
     if (!round) {
       throw new NotFoundError(ROOM_ERRORS.ROUND_NOT_FOUND);
     }
@@ -556,7 +548,7 @@ export class RoomService implements IRoomService {
 
   public async setPlayersAsUnready(roomCode: string): Promise<void> {
     try {
-      await this.roomPlayersRepository.setPlayersAsUnready(roomCode);
+      await this.store.players.setPlayersAsUnready(roomCode);
     } catch (error) {
       throw new InternalServerError(
         'Erro ao definir jogadores como não prontos.',
@@ -567,7 +559,7 @@ export class RoomService implements IRoomService {
 
   public async createRound(data: CreateRoundDTO): Promise<Round> {
     try {
-      const round = await this.roundsRepository.create({
+      const round = await this.store.rounds.create({
         id: createId(),
         roomCode: data.roomCode,
         judgeId: data.judgeId,
@@ -592,7 +584,7 @@ export class RoomService implements IRoomService {
     roundNumber: number
   ): Promise<RoundPlayedCard[]> {
     const roundPlayedCards =
-      await this.roundPlayedCardsRepository.findByRoomCodeAndRoundNumber(
+      await this.store.playedCards.findByRoomCodeAndRoundNumber(
         roomCode,
         roundNumber
       );
@@ -605,7 +597,7 @@ export class RoomService implements IRoomService {
   // Round, an explicit Judge leave aborts it. See ADR-0002/0003, issue #4.
   public async getActiveRound(roomCode: string): Promise<Round | null> {
     const room = await this.getRoom(roomCode);
-    return await this.roundsRepository.find(roomCode, room.round);
+    return await this.store.rounds.find(roomCode, room.round);
   }
 
   // Everything a (re)connecting client needs to render the current Round, since
@@ -656,7 +648,7 @@ export class RoomService implements IRoomService {
     this.assertCanRotate(room, currentRound);
 
     const players =
-      await this.roomPlayersRepository.getRoomPlayersByCode(roomCode);
+      await this.store.players.getRoomPlayersByCode(roomCode);
     // Exclude the Judge who just judged (room.judgeId). Excluding prevJudgeId
     // let the same Player judge twice in a row.
     const nextJudgeId = getRandomJudge(room.judgeId, players);
@@ -664,8 +656,8 @@ export class RoomService implements IRoomService {
 
     // `isReady` doubles as "played this Round"; never resetting it locked every
     // Player out of Round 2 with "already played".
-    await this.roomPlayersRepository.setPlayersAsUnready(roomCode);
-    const updatedRoom = await this.roomRepository.update(roomCode, {
+    await this.store.players.setPlayersAsUnready(roomCode);
+    const updatedRoom = await this.store.rooms.update(roomCode, {
       round: currentRound + 1,
       judgeId: nextJudgeId,
       prevJudgeId: room.judgeId
@@ -752,7 +744,7 @@ export class RoomService implements IRoomService {
       round.roundNumber
     );
     const winner = plays.find(play => play.player.id === winnerPlayerId);
-    const stillInRoom = await this.roomPlayersRepository.getPlayerFromRoom(
+    const stillInRoom = await this.store.players.getPlayerFromRoom(
       round.roomCode,
       winnerPlayerId
     );
@@ -768,7 +760,7 @@ export class RoomService implements IRoomService {
     round: Round,
     winner: RoundPlayedCard
   ): Promise<void> {
-    const claimed = await this.roundsRepository.claimAdvance(
+    const claimed = await this.store.rounds.claimAdvance(
       round.id,
       'JUDGING',
       'COMPLETE'
@@ -779,7 +771,7 @@ export class RoomService implements IRoomService {
       );
     }
     // roundWinnerId relates to round_played_cards.id (see roundsRelations).
-    await this.roundsRepository.update(round.id, {
+    await this.store.rounds.update(round.id, {
       roundWinnerId: winner.id,
       updatedAt: new Date()
     });

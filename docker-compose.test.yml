@@ -1,22 +1,30 @@
 version: '3.8'
 
+# Throwaway Postgres + Redis for the opt-in DB specs (RUN_DB_MIGRATIONS=true).
+# Credentials and database name must match .env.test.
 services:
   db:
-    image: postgres:latest
+    image: postgres:16
     container_name: caho_test_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: caho
+      POSTGRES_PASSWORD: caho
       POSTGRES_DB: caho_test
     ports:
       - '5432:5432'
     networks:
       - test-network
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'caho', '-d', 'caho_test']
+      interval: 2s
+      timeout: 5s
+      retries: 15
 
   redis:
     image: redis:latest
     container_name: caho_test_redis
-    command: ['redis-server', '--notify-keyspace-events', 'Ex']
+    command:
+      ['redis-server', '--requirepass', 'caho', '--notify-keyspace-events', 'Ex']
     ports:
       - '6379:6379'
     networks:

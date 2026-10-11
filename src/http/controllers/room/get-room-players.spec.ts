@@ -26,7 +26,7 @@ vi.mock('@/services/room/RoomServiceFactory', () => ({
 }));
 vi.mock('@/services/CardServiceFactory', () => ({
   CardServiceFactory: (roomCode: string) =>
-    buildRoomReadsCardService(roomCode, roomReadsFixture.fakes.room)
+    buildRoomReadsCardService(roomCode)
 }));
 
 const CALLER: SessionUser = {

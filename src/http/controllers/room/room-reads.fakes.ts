@@ -1,7 +1,6 @@
-import type { IRoomRepository } from '@/repositories/room';
-import type { RoomPlayer, WhiteCard } from '@/schemas';
+import { makeWhiteCard } from '@/repositories/game-store/gameStore.fixtures';
+import type { RoomPlayer } from '@/schemas';
 import { CardService } from '@/services/CardService';
-import { FakeCardRepository } from '@/services/CardService.fakes';
 import {
   buildService,
   makePlayer,
@@ -16,16 +15,10 @@ import {
 export const CALLER_ID = 'player-caller';
 export const JUDGE_ID = 'player-judge';
 
-const whiteCard = (id: string): WhiteCard => ({
-  id,
-  text: `white ${id}`,
-  packId: 'base-pack'
-});
+export const CALLER_HAND = [makeWhiteCard('caller-1'), makeWhiteCard('caller-2')];
+const JUDGE_HAND = [makeWhiteCard('judge-1'), makeWhiteCard('judge-2')];
 
-export const CALLER_HAND = [whiteCard('caller-1'), whiteCard('caller-2')];
-const JUDGE_HAND = [whiteCard('judge-1'), whiteCard('judge-2')];
-
-export const roomReadsFixture = buildService({
+export const roomReadsFixture = await buildService({
   room: makeRoom({ hostId: JUDGE_ID, judgeId: JUDGE_ID }),
   players: [
     makePlayer({
@@ -41,9 +34,7 @@ export const roomReadsFixture = buildService({
       score: 2,
       cardIds: JUDGE_HAND.map(card => card.id)
     })
-  ],
-  rounds: [],
-  playedCards: []
+  ]
 });
 
 // What GET /:roomCode/players must return for the fixture: the public RoomPlayer
@@ -70,19 +61,13 @@ export const EXPECTED_ROOM_PLAYERS: RoomPlayer[] = [
 ];
 
 /**
- * Stands in for CardServiceFactory: the real CardService over an in-memory pool
- * holding every Player's Hand.
+ * Stands in for CardServiceFactory: the real CardService over the fixture's
+ * in-memory store, whose pool holds every Player's Hand.
  *
  * @example
- * buildRoomReadsCardService(ROOM_CODE, roomReadsFixture.fakes.room);
+ * buildRoomReadsCardService(ROOM_CODE);
  */
-export function buildRoomReadsCardService(
-  roomCode: string,
-  rooms: IRoomRepository
-): CardService {
-  return new CardService(
-    roomCode,
-    new FakeCardRepository([...CALLER_HAND, ...JUDGE_HAND], []),
-    rooms
-  );
+export function buildRoomReadsCardService(roomCode: string): CardService {
+  const { store } = roomReadsFixture;
+  return new CardService(roomCode, store.cards, store.rooms);
 }
