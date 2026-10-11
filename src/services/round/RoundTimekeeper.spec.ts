@@ -57,7 +57,7 @@ async function buildTimekeeper(args: {
     room: makeRoom(),
     players: playedBy.map(id => makePlayer({ id })),
     rounds: args.rounds,
-    plays: playedBy.map(playerId => ({ roundId: ROUND_ID, playerId, whiteCardIds: ['w1'] }))
+    playedCards: playedBy.map(playerId => ({ roundId: ROUND_ID, playerId, whiteCardIds: ['w1'] }))
   });
 
   const fakes: Fakes = {

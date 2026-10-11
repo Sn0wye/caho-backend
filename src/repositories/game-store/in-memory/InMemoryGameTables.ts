@@ -19,7 +19,7 @@ export type PlayerRow = {
 };
 
 // One round_played_cards row plus its ordered white-card pivot rows.
-export type PlayRow = {
+export type PlayedCardsRow = {
   id: string;
   roundId: string;
   playerId: string;
@@ -28,20 +28,31 @@ export type PlayRow = {
   updatedAt: Date;
 };
 
+/**
+ * Shared rows behind every in-memory repository; build one per store.
+ *
+ * @example
+ * const tables = new InMemoryGameTables(whiteCards, blackCards);
+ */
 export class InMemoryGameTables {
   readonly rooms = new Map<string, Room>();
   readonly players: PlayerRow[] = [];
   // Stands in for the users table: the profile a Player last joined with.
   readonly users = new Map<string, PublicUser>();
   readonly rounds = new Map<string, Round>();
-  readonly plays: PlayRow[] = [];
+  readonly playedCards: PlayedCardsRow[] = [];
 
   constructor(
     readonly whiteCards: WhiteCard[],
     readonly blackCards: BlackCard[]
   ) {}
 
-  // FK guard mirroring `references(() => rooms.code)`.
+  /**
+   * FK guard mirroring `references(() => rooms.code)`.
+   *
+   * @example
+   * tables.requireRoom('ABC123', 'rounds(round-1)');
+   */
   requireRoom(roomCode: string, writing: string): Room {
     const room = this.rooms.get(roomCode);
     if (!room) {

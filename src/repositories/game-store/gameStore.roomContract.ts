@@ -15,8 +15,13 @@ import {
 // The Room, Player and card-draw half of the IGameStore contract; wired in by
 // describeGameStoreContract. See issue #24.
 
-// The draw is a side effect on the Room: the Black Card becomes current and is
-// recorded so it doesn't repeat. Reads after a draw must see both.
+/**
+ * Card draws as Room side effects: a drawn Black Card becomes current and is
+ * recorded so it doesn't repeat; dealt White Cards join the Room's ledger.
+ *
+ * @example
+ * describeCardDraws(harness); // inside describeGameStoreContract
+ */
 // biome-ignore lint/suspicious/noExportsInTest: part of the shared contract suite.
 export function describeCardDraws(harness: GameStoreHarness): void {
   it('drawing a Black Card makes it the Room current Black Card', async () => {
@@ -24,7 +29,7 @@ export function describeCardDraws(harness: GameStoreHarness): void {
     await seedGame(
       store,
       { room: makeRoom({ currentBlackCardId: null, pickedBlackCards: [] }) },
-      harness
+      harness.users
     );
 
     const drawn = await new BlackCardDeck(store).drawBlackCard(ROOM_CODE);
@@ -39,7 +44,7 @@ export function describeCardDraws(harness: GameStoreHarness): void {
 
   it('dealing White Cards records them on the Room so they do not repeat', async () => {
     const store = await harness.open(CONTRACT_POOL);
-    await seedGame(store, { room: makeRoom() }, harness);
+    await seedGame(store, { room: makeRoom() }, harness.users);
     const dealer = new WhiteCardDealer(store);
 
     const first = await dealer.dealWhiteCards(ROOM_CODE, 2);
@@ -52,6 +57,13 @@ export function describeCardDraws(harness: GameStoreHarness): void {
   });
 }
 
+/**
+ * Room and Player rows: Code-keyed updates, join defaults, writable columns,
+ * scoring and Ranking, Leave, unique Round numbers and the public lobby list.
+ *
+ * @example
+ * describeRoomsAndPlayers(harness); // inside describeGameStoreContract
+ */
 // biome-ignore lint/suspicious/noExportsInTest: part of the shared contract suite.
 export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   it('keys Room updates by Code: any other key changes nothing', async () => {
@@ -59,7 +71,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
     await seedGame(
       store,
       { room: makeRoom({ id: 'room-1', round: 1 }) },
-      harness
+      harness.users
     );
 
     const missed = await store.rooms.update('room-1', { round: 2 });
@@ -72,8 +84,8 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
 
   it('joins a Player with no score, an empty Hand and as active', async () => {
     const store = await harness.open(CONTRACT_POOL);
-    await seedGame(store, { room: makeRoom() }, harness);
-    await harness.registerUser({
+    await seedGame(store, { room: makeRoom() }, harness.users);
+    await harness.users.registerUser({
       id: 'player-a',
       username: 'Ana',
       avatarUrl: null
@@ -108,6 +120,34 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
     ]);
   });
 
+  it('writes several Players at once, columns only', async () => {
+    const store = await harness.open(CONTRACT_POOL);
+    const ana = makePlayer({ id: 'player-a', username: 'Ana' });
+    const bo = makePlayer({ id: 'player-b', username: 'Bo' });
+    await seedGame(
+      store,
+      { room: makeRoom(), players: [ana, bo] },
+      harness.users
+    );
+
+    await store.players.updatePlayers(ROOM_CODE, [
+      { ...ana, score: 4, cardIds: ['w1'], username: 'Mallory' },
+      { ...bo, isActive: false, isJudge: true }
+    ]);
+
+    expect(await store.players.getRoomPlayersByCode(ROOM_CODE)).toEqual(
+      expect.arrayContaining([
+        makePlayer({
+          id: 'player-a',
+          username: 'Ana',
+          score: 4,
+          cardIds: ['w1']
+        }),
+        makePlayer({ id: 'player-b', username: 'Bo', isActive: false })
+      ])
+    );
+  });
+
   it('ignores identity and isJudge in a Player update', async () => {
     const store = await harness.open(CONTRACT_POOL);
     await seedGame(
@@ -116,7 +156,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
         room: makeRoom(),
         players: [makePlayer({ id: 'player-a', username: 'Ana' })]
       },
-      harness
+      harness.users
     );
 
     await store.players.updatePlayerInRoom(ROOM_CODE, 'player-a', {
@@ -146,7 +186,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
           makePlayer({ id: 'player-b', score: 2, isReady: true })
         ]
       },
-      harness
+      harness.users
     );
 
     await store.players.incrementPlayerScore({
@@ -173,11 +213,11 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
         room: makeRoom(),
         players: [makePlayer({ id: 'player-a', username: 'Ana' })],
         rounds: [makeRound()],
-        plays: [
+        playedCards: [
           { roundId: 'round-1', playerId: 'player-a', whiteCardIds: ['w1'] }
         ]
       },
-      harness
+      harness.users
     );
 
     await store.players.deletePlayerFromRoom(ROOM_CODE, 'player-a');
@@ -185,11 +225,11 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
     expect(
       await store.players.getPlayerFromRoom(ROOM_CODE, 'player-a')
     ).toBeUndefined();
-    const [play] = await store.playedCards.findByRoomCodeAndRoundNumber(
+    const [playedCards] = await store.playedCards.findByRoomCodeAndRoundNumber(
       ROOM_CODE,
       1
     );
-    expect(play.player).toEqual({
+    expect(playedCards.player).toEqual({
       id: 'player-a',
       username: 'Ana',
       avatarUrl: null
@@ -220,7 +260,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
         room: makeRoom({ ...lobby, id: 'r-open', code: 'OPEN01' }),
         players: [makePlayer({ id: 'player-a', username: 'Ana' })]
       },
-      harness
+      harness.users
     );
     await seedGame(
       store,
@@ -232,12 +272,12 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
           isPublic: false
         })
       },
-      harness
+      harness.users
     );
     await seedGame(
       store,
       { room: makeRoom({ id: 'r-live', code: 'LIVE01', hostId: 'player-a' }) },
-      harness
+      harness.users
     );
 
     expect(await store.rooms.listPublicRooms()).toEqual([

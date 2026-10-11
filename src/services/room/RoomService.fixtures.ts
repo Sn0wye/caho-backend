@@ -1,3 +1,4 @@
+import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
 import type { BlackCard } from '@/repositories/cards';
 import { InMemoryGameStore } from '@/repositories/game-store/InMemoryGameStore';
 import {
@@ -22,10 +23,16 @@ export {
   makeRound
 } from '@/repositories/game-store/gameStore.fixtures';
 
-type PlaySeed = NonNullable<GameSeed['plays']>[number];
-
-// A Player's answer for Round 1, played with a card of their own.
-export function makePlay(playerId: string, roundId = 'round-1'): PlaySeed {
+/**
+ * A Player's Played Cards for a Round, one card of their own named after them.
+ *
+ * @example
+ * await buildService({ room, players, rounds, playedCards: [makePlayedCards('player-a')] });
+ */
+export function makePlayedCards(
+  playerId: string,
+  roundId = 'round-1'
+): CreateRoundPlayedCardDTO {
   return { roundId, playerId, whiteCardIds: [`card-${playerId}`] };
 }
 
@@ -40,12 +47,15 @@ const DEFAULT_BLACK_CARDS = [
   makeBlackCard({ id: 'black-2' })
 ];
 
-// Every card a seeded Hand or play names must exist in the pool, like the
+// Every card a seeded Hand or Played Cards entry names must exist in the pool, like the
 // white_cards FK requires.
-function whiteCardPool(players: Player[], plays: PlaySeed[]): WhiteCard[] {
+function whiteCardPool(
+  players: Player[],
+  playedCards: CreateRoundPlayedCardDTO[]
+): WhiteCard[] {
   const named = [
     ...players.flatMap(player => player.cardIds),
-    ...plays.flatMap(play => play.whiteCardIds)
+    ...playedCards.flatMap(answer => answer.whiteCardIds)
   ];
   return [...DEALABLE_WHITE_CARDS, ...[...new Set(named)].map(makeWhiteCard)];
 }
@@ -60,7 +70,7 @@ export async function buildService(
   seed: GameSeed & { blackCards?: BlackCard[] }
 ): Promise<{ service: RoomService; store: InMemoryGameStore }> {
   const store = new InMemoryGameStore({
-    whiteCards: whiteCardPool(seed.players ?? [], seed.plays ?? []),
+    whiteCards: whiteCardPool(seed.players ?? [], seed.playedCards ?? []),
     blackCards: seed.blackCards ?? DEFAULT_BLACK_CARDS
   });
   await seedGame(store, seed);

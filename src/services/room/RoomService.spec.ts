@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ROOM_CODE,
   buildService,
-  makePlay,
+  makePlayedCards,
   makePlayer,
   makeRoom,
   makeRound
@@ -23,7 +23,7 @@ describe('RoomService.processJudgeChooseWinner', () => {
       room: makeRoom({ maxPoints: 5 }),
       players: [judge, winner],
       rounds: [makeRound({ status: 'JUDGING' })],
-      plays: [makePlay('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
 
     const result = await service.processJudgeChooseWinner({
@@ -40,7 +40,7 @@ describe('RoomService.processJudgeChooseWinner', () => {
       room: makeRoom({ maxPoints: 5 }),
       players: [judge, makePlayer({ id: 'player-winner', score: 0 })],
       rounds: [makeRound({ status: 'JUDGING' })],
-      plays: [makePlay('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
 
     const result = await service.processJudgeChooseWinner({
@@ -58,7 +58,7 @@ describe('RoomService.processJudgeChooseWinner', () => {
       room: makeRoom({ maxPoints: 2 }),
       players: [judge, makePlayer({ id: 'player-winner', score: 1 })],
       rounds: [makeRound({ status: 'JUDGING' })],
-      plays: [makePlay('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
 
     const result = await service.processJudgeChooseWinner({

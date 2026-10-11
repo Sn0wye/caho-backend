@@ -1,35 +1,42 @@
 import { db } from '@/db';
-import type { IRoundPlayedCardsRepository } from './IRoundPlayedCardsRepository';
+import { roundPlayedCardWhiteCards, roundPlayedCards } from '@/db/schema';
 import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
 import type { RoundPlayedCard } from '@/schemas';
-import { roundPlayedCards, roundPlayedCardWhiteCards } from '@/db/schema';
 import { createId } from '@paralleldrive/cuid2';
 import { asc } from 'drizzle-orm';
+import type { IRoundPlayedCardsRepository } from './IRoundPlayedCardsRepository';
 
 export class RoundPlayedCardsRepository implements IRoundPlayedCardsRepository {
   private readonly db = db;
 
+  // One transaction for the answer and its cards: a failed card insert used to
+  // leave the answer row behind, so the Player's corrected retry hit the
+  // one-answer-per-Round index and was locked out. Found by the game-store
+  // contract (issue #24).
   public async create(
     data: CreateRoundPlayedCardDTO
   ): Promise<Omit<RoundPlayedCard, 'player' | 'whiteCards'>> {
-    const [inserted] = await this.db
-      .insert(roundPlayedCards)
-      .values({
-        id: createId(),
-        roundId: data.roundId,
-        playerId: data.playerId
-      })
-      .returning();
+    const inserted = await this.db.transaction(async tx => {
+      const [answer] = await tx
+        .insert(roundPlayedCards)
+        .values({
+          id: createId(),
+          roundId: data.roundId,
+          playerId: data.playerId
+        })
+        .returning();
 
-    if (!inserted) throw new Error('Failed to create round played card');
+      if (!answer) throw new Error('Failed to create round played card');
 
-    await this.db.insert(roundPlayedCardWhiteCards).values(
-      data.whiteCardIds.map((whiteCardId, position) => ({
-        roundPlayedCardId: inserted.id,
-        whiteCardId,
-        position
-      }))
-    );
+      await tx.insert(roundPlayedCardWhiteCards).values(
+        data.whiteCardIds.map((whiteCardId, position) => ({
+          roundPlayedCardId: answer.id,
+          whiteCardId,
+          position
+        }))
+      );
+      return answer;
+    });
 
     return {
       id: inserted.id,

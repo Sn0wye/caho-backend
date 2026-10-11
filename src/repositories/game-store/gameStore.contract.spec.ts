@@ -1,9 +1,9 @@
-import { postgresPool } from '@/db';
+import { db, postgresPool } from '@/db';
 import { afterAll, describe } from 'vitest';
 import { InMemoryGameStore } from './InMemoryGameStore';
-import { postgresGameStoreHarness } from './PostgresGameStore.harness';
+import { createPostgresGameStoreHarness } from './PostgresGameStore.harness';
 import { describeGameStoreContract } from './gameStore.contract';
-import { IN_MEMORY_USERS } from './gameStore.fixtures';
+import { InMemoryUserRegistry } from './gameStore.fixtures';
 
 // One contract, two adapters (issue #24). The in-memory run is always on; the
 // Postgres run needs the docker-compose.test database and is opt-in through the
@@ -12,8 +12,8 @@ import { IN_MEMORY_USERS } from './gameStore.fixtures';
 //   RUN_DB_MIGRATIONS=true pnpm test
 
 describeGameStoreContract({
-  ...IN_MEMORY_USERS,
   name: 'in-memory',
+  users: new InMemoryUserRegistry(),
   async open(pool) {
     return new InMemoryGameStore(pool);
   }
@@ -24,5 +24,5 @@ describe.skipIf(process.env.RUN_DB_MIGRATIONS !== 'true')('Postgres', () => {
     await postgresPool.end();
   });
 
-  describeGameStoreContract(postgresGameStoreHarness);
+  describeGameStoreContract(createPostgresGameStoreHarness(db));
 });

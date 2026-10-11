@@ -16,10 +16,14 @@ import {
   describeRoomsAndPlayers
 } from './gameStore.roomContract';
 
-// What the game loop may rely on from any IGameStore. Every case runs against
-// both adapters (gameStore.contract.spec), so the in-memory store can't drift
-// from Postgres: when they disagree, a case fails. See issue #24.
-
+/**
+ * What the game loop may rely on from any IGameStore. Every case runs against
+ * both adapters (gameStore.contract.spec), so the in-memory store can't drift
+ * from Postgres: when they disagree, a case fails. See issue #24.
+ *
+ * @example
+ * describeGameStoreContract({ name: 'in-memory', users, open: async pool => new InMemoryGameStore(pool) });
+ */
 // biome-ignore lint/suspicious/noExportsInTest: a shared suite, not a spec; gameStore.contract.spec runs it per adapter.
 export function describeGameStoreContract(harness: GameStoreHarness): void {
   describe(`IGameStore contract: ${harness.name}`, () => {
@@ -45,7 +49,7 @@ function describeJudgeDerivation(harness: GameStoreHarness): void {
           makePlayer({ id: 'player-b', isJudge: true })
         ]
       },
-      harness
+      harness.users
     );
 
     expect(await judgeFlags(store)).toEqual({
@@ -84,12 +88,12 @@ function describePlayedCards(harness: GameStoreHarness): void {
         ],
         rounds: [makeRound()]
       },
-      harness
+      harness.users
     );
     return store;
   }
 
-  it('reads a play back straight after it is written, cards in play order', async () => {
+  it('reads Played Cards back straight after the write, in submitted order', async () => {
     const store = await openWithRound();
 
     const created = await store.playedCards.create({
@@ -97,12 +101,12 @@ function describePlayedCards(harness: GameStoreHarness): void {
       playerId: 'player-a',
       whiteCardIds: ['w3', 'w1']
     });
-    const plays = await store.playedCards.findByRoomCodeAndRoundNumber(
+    const playedCards = await store.playedCards.findByRoomCodeAndRoundNumber(
       ROOM_CODE,
       1
     );
 
-    expect(plays).toEqual([
+    expect(playedCards).toEqual([
       expect.objectContaining({
         id: created.id,
         roundId: 'round-1',
@@ -116,7 +120,7 @@ function describePlayedCards(harness: GameStoreHarness): void {
     ]);
   });
 
-  it('returns no plays for a Round that does not exist', async () => {
+  it('returns no Played Cards for a Round that does not exist', async () => {
     const store = await openWithRound();
 
     expect(
@@ -124,24 +128,49 @@ function describePlayedCards(harness: GameStoreHarness): void {
     ).toEqual([]);
   });
 
-  it('rejects a second play by the same Player in the same Round', async () => {
+  it('rejects a second Played Cards entry by the same Player in a Round', async () => {
     const store = await openWithRound();
-    const play = {
+    const answer = {
       roundId: 'round-1',
       playerId: 'player-a',
       whiteCardIds: ['w1']
     };
-    await store.playedCards.create(play);
+    await store.playedCards.create(answer);
 
     await expect(
-      store.playedCards.create({ ...play, whiteCardIds: ['w2'] })
+      store.playedCards.create({ ...answer, whiteCardIds: ['w2'] })
     ).rejects.toThrow();
 
-    const plays = await store.playedCards.findByRoomCodeAndRoundNumber(
+    const playedCards = await store.playedCards.findByRoomCodeAndRoundNumber(
       ROOM_CODE,
       1
     );
-    expect(plays.map(p => p.whiteCards.map(card => card.id))).toEqual([['w1']]);
+    expect(
+      playedCards.map(entry => entry.whiteCards.map(card => card.id))
+    ).toEqual([['w1']]);
+  });
+
+  // A write that fails on its White Cards must leave nothing behind, or the
+  // Player's corrected retry is rejected as a second answer.
+  it('keeps nothing from a failed write, so a corrected retry succeeds', async () => {
+    const store = await openWithRound();
+    const answer = { roundId: 'round-1', playerId: 'player-a' };
+
+    await expect(
+      store.playedCards.create({
+        ...answer,
+        whiteCardIds: ['w1', 'no-such-card']
+      })
+    ).rejects.toThrow();
+    await store.playedCards.create({ ...answer, whiteCardIds: ['w2'] });
+
+    const playedCards = await store.playedCards.findByRoomCodeAndRoundNumber(
+      ROOM_CODE,
+      1
+    );
+    expect(
+      playedCards.map(entry => entry.whiteCards.map(card => card.id))
+    ).toEqual([['w2']]);
   });
 }
 

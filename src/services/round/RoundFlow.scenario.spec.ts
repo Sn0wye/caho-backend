@@ -14,7 +14,7 @@ import { FakeRoundTimerStore } from './RoundTimekeeper.fakes';
 
 // End-to-end game-loop scenarios: the real RoundFlow, RoomService and
 // RoundTimekeeper over one InMemoryGameStore, faking only Redis and the
-// publisher. Possible now that a play is readable straight after it is
+// publisher. Possible now that Played Cards are readable straight after it is
 // written and isJudge follows the Room. See issue #24.
 
 const PLAYER_IDS = ['player-judge', 'player-a', 'player-b'];
@@ -62,7 +62,7 @@ describe('RoundFlow over the in-memory game store', () => {
     const prompts = timeToJudgeEvents(publisher);
     expect(prompts).toHaveLength(1);
     const playerIds = prompts[0].payload.roundPlayedCards.map(
-      play => play.player.id
+      playedCards => playedCards.player.id
     );
     expect(playerIds.sort()).toEqual(['player-a', 'player-b']);
     expect((await store.rounds.findById('round-1'))?.status).toBe('JUDGING');

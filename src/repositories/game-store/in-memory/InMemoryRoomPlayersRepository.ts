@@ -24,24 +24,32 @@ function toColumns(payload: Partial<Player>): Partial<PlayerColumns> {
 export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
   constructor(private readonly tables: InMemoryGameTables) {}
 
+  /**
+   * Every Player in the Room, in join order.
+   *
+   * @example
+   * const players = await store.players.getRoomPlayersByCode('ABC123');
+   */
   async getRoomPlayersByCode(roomCode: string): Promise<Player[]> {
     return this.tables.players
       .filter(row => row.roomCode === roomCode)
       .map(row => this.toPlayer(row));
   }
 
-  // Mirrors the INSERT: score 0, empty Hand, active; only Host/ready come in.
+  /**
+   * Join a Player. Mirrors the INSERT: score 0, empty Hand, active; only the
+   * Host and ready flags come from `player`.
+   *
+   * @example
+   * await store.players.addPlayerToRoom({ roomCode: 'ABC123', player });
+   */
   async addPlayerToRoom(input: {
     roomCode: string;
     player: Player;
   }): Promise<void> {
     const { roomCode, player } = input;
     this.tables.requireRoom(roomCode, `room_players(${player.id})`);
-    if (this.findRow(roomCode, player.id)) {
-      throw new Error(
-        `Unique violation on room_players: Player "${player.id}" already in Room "${roomCode}" (expected one row per Room and Player)`
-      );
-    }
+    this.assertNotJoined(roomCode, player.id);
     const { id, username, avatarUrl } = player;
     this.tables.users.set(id, { id, username, avatarUrl });
     this.tables.players.push({
@@ -55,6 +63,12 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
     });
   }
 
+  /**
+   * One Player in the Room, or undefined.
+   *
+   * @example
+   * const judge = await store.players.getPlayerFromRoom('ABC123', 'player-b');
+   */
   async getPlayerFromRoom(
     roomCode: string,
     playerId: string
@@ -63,13 +77,25 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
     return row ? this.toPlayer(row) : undefined;
   }
 
+  /**
+   * Codes of every Room the User plays in.
+   *
+   * @example
+   * const codes = await store.players.getRoomCodesByPlayerId('player-a');
+   */
   async getRoomCodesByPlayerId(playerId: string): Promise<string[]> {
     return this.tables.players
       .filter(row => row.playerId === playerId)
       .map(row => row.roomCode);
   }
 
-  // An UPDATE matching no row is silent, not an error.
+  /**
+   * Patch a Player's room_players columns. Matching no row is silent, as an
+   * UPDATE is.
+   *
+   * @example
+   * await store.players.updatePlayerInRoom('ABC123', 'player-a', { isReady: true });
+   */
   async updatePlayerInRoom(
     roomCode: string,
     playerId: string,
@@ -79,6 +105,12 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
     if (row) Object.assign(row, cloneRow(toColumns(payload)));
   }
 
+  /**
+   * Write several Players' room_players columns at once.
+   *
+   * @example
+   * await store.players.updatePlayers('ABC123', [{ ...player, score: 2 }]);
+   */
   async updatePlayers(roomCode: string, players: Player[]): Promise<Player[]> {
     for (const player of players) {
       await this.updatePlayerInRoom(roomCode, player.id, player);
@@ -86,12 +118,24 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
     return players;
   }
 
+  /**
+   * Clear every Player's ready ("played this Round") flag.
+   *
+   * @example
+   * await store.players.setPlayersAsUnready('ABC123');
+   */
   async setPlayersAsUnready(roomCode: string): Promise<void> {
     for (const row of this.tables.players) {
       if (row.roomCode === roomCode) row.isReady = false;
     }
   }
 
+  /**
+   * Add `by` to a Player's score.
+   *
+   * @example
+   * await store.players.incrementPlayerScore({ roomCode: 'ABC123', playerId: 'player-a', by: 1 });
+   */
   async incrementPlayerScore(input: {
     roomCode: string;
     playerId: string;
@@ -101,6 +145,12 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
     if (row) row.score += input.by;
   }
 
+  /**
+   * Remove a Player who Leaves. Their profile stays, as the users row does.
+   *
+   * @example
+   * await store.players.deletePlayerFromRoom('ABC123', 'player-a');
+   */
   async deletePlayerFromRoom(
     roomCode: string,
     playerId: string
@@ -109,6 +159,14 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
       row => row.roomCode === roomCode && row.playerId === playerId
     );
     if (index !== -1) this.tables.players.splice(index, 1);
+  }
+
+  private assertNotJoined(roomCode: string, playerId: string): void {
+    if (this.findRow(roomCode, playerId)) {
+      throw new Error(
+        `Unique violation on room_players: Player "${playerId}" already in Room "${roomCode}" (expected one row per Room and Player)`
+      );
+    }
   }
 
   private findRow(roomCode: string, playerId: string): PlayerRow | undefined {

@@ -8,7 +8,7 @@ import {
 
 const ACTIVE_PHASES: RoundStatus[] = ['PLAYING', 'JUDGING'];
 
-function passed(deadline: Date | null, now: Date): boolean {
+function deadlineHasExpired(deadline: Date | null, now: Date): boolean {
   return deadline != null && deadline.getTime() <= now.getTime();
 }
 
@@ -18,13 +18,25 @@ function passed(deadline: Date | null, now: Date): boolean {
 export class InMemoryRoundRepository implements IGameRoundRepository {
   constructor(private readonly tables: InMemoryGameTables) {}
 
-  async create(input: Round): Promise<Round> {
-    this.tables.requireRoom(input.roomCode, `rounds(${input.id})`);
-    this.assertUnique(input);
-    this.tables.rounds.set(input.id, cloneRow(input));
-    return cloneRow(input);
+  /**
+   * Insert a Round; its Room must exist and its number be unused there.
+   *
+   * @example
+   * await store.rounds.create(makeRound({ roundNumber: 2 }));
+   */
+  async create(round: Round): Promise<Round> {
+    this.tables.requireRoom(round.roomCode, `rounds(${round.id})`);
+    this.assertUnique(round);
+    this.tables.rounds.set(round.id, cloneRow(round));
+    return cloneRow(round);
   }
 
+  /**
+   * A Room's Round by number, or null.
+   *
+   * @example
+   * const current = await store.rounds.find('ABC123', room.round);
+   */
   async find(roomCode: string, number: number): Promise<Round | null> {
     const round = [...this.tables.rounds.values()].find(
       candidate =>
@@ -33,23 +45,40 @@ export class InMemoryRoundRepository implements IGameRoundRepository {
     return round ? cloneRow(round) : null;
   }
 
+  /**
+   * A Round by id, or null.
+   *
+   * @example
+   * const round = await store.rounds.findById('round-1');
+   */
   async findById(id: string): Promise<Round | null> {
     const round = this.tables.rounds.get(id);
     return round ? cloneRow(round) : null;
   }
 
-  async update(id: string, data: Partial<Round>): Promise<Round | null> {
+  /**
+   * Patch a Round by id; null when no Round matches.
+   *
+   * @example
+   * await store.rounds.update('round-1', { judgeDeadline: null });
+   */
+  async update(id: string, roundPatch: Partial<Round>): Promise<Round | null> {
     const round = this.tables.rounds.get(id);
     if (!round) {
       return null;
     }
-    const updated = { ...round, ...definedOnly(data) };
+    const updated = { ...round, ...definedOnly(roundPatch) };
     this.tables.rounds.set(id, cloneRow(updated));
     return cloneRow(updated);
   }
 
-  // UPDATE ... WHERE id = $id AND status IN ($from): a Round no longer in an
-  // allowed phase matches nothing, so a replayed claim returns null.
+  /**
+   * UPDATE ... WHERE id = $id AND status IN ($from): a Round no longer in an
+   * allowed phase matches nothing, so a replayed claim returns null.
+   *
+   * @example
+   * const won = await store.rounds.claimAdvance('round-1', 'PLAYING', 'JUDGING');
+   */
   async claimAdvance(
     id: string,
     from: RoundStatus | RoundStatus[],
@@ -63,30 +92,37 @@ export class InMemoryRoundRepository implements IGameRoundRepository {
     return await this.update(id, { status: to, updatedAt: new Date() });
   }
 
+  /**
+   * PLAYING/JUDGING Rounds with a play or Judge deadline at or before `now`.
+   *
+   * @example
+   * const missed = await store.rounds.findExpiredActive(new Date());
+   */
   async findExpiredActive(now: Date): Promise<Round[]> {
     return [...this.tables.rounds.values()]
       .filter(round => ACTIVE_PHASES.includes(round.status))
       .filter(
         round =>
-          passed(round.playDeadline, now) || passed(round.judgeDeadline, now)
+          deadlineHasExpired(round.playDeadline, now) ||
+          deadlineHasExpired(round.judgeDeadline, now)
       )
       .map(cloneRow);
   }
 
-  private assertUnique(input: Round): void {
-    if (this.tables.rounds.has(input.id)) {
+  private assertUnique(round: Round): void {
+    if (this.tables.rounds.has(round.id)) {
       throw new Error(
-        `Unique violation on rounds.id: "${input.id}" already exists (expected a fresh Round id)`
+        `Unique violation on rounds.id: "${round.id}" already exists (expected a fresh Round id)`
       );
     }
     const clash = [...this.tables.rounds.values()].some(
-      round =>
-        round.roomCode === input.roomCode &&
-        round.roundNumber === input.roundNumber
+      existing =>
+        existing.roomCode === round.roomCode &&
+        existing.roundNumber === round.roundNumber
     );
     if (clash) {
       throw new Error(
-        `Unique violation on rounds(room_code, round_number): Room "${input.roomCode}" already has Round ${input.roundNumber} (expected one Round per number)`
+        `Unique violation on rounds(room_code, round_number): Room "${round.roomCode}" already has Round ${round.roundNumber} (expected one Round per number)`
       );
     }
   }

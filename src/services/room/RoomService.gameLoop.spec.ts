@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ROOM_CODE,
   buildService,
-  makePlay,
+  makePlayedCards,
   makePlayer,
   makeRoom,
   makeRound
@@ -76,7 +76,7 @@ describe('RoomService.processJudgeChooseWinner phase rules', () => {
       room: makeRoom(),
       players: [judge(), makePlayer({ id: 'player-winner' })],
       rounds: [makeRound({ status })],
-      plays: [makePlay('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
   }
 
@@ -133,8 +133,8 @@ describe('RoomService.playCards rules', () => {
 
     const { player, cardsDrawn } = await service.playCards(ROOM_CODE, 'player-a', ['w3', 'w1']);
 
-    const [play] = await store.playedCards.findByRoomCodeAndRoundNumber(ROOM_CODE, 1);
-    expect(play.whiteCards.map(card => card.id)).toEqual(['w3', 'w1']);
+    const [playedCards] = await store.playedCards.findByRoomCodeAndRoundNumber(ROOM_CODE, 1);
+    expect(playedCards.whiteCards.map(card => card.id)).toEqual(['w3', 'w1']);
     expect(player.isReady).toBe(true);
     expect(cardsDrawn).toHaveLength(2);
   });
@@ -260,7 +260,7 @@ describe('RoomService.getRoundSnapshot', () => {
       room: makeRoom(),
       players: [judge(), makePlayer({ id: 'player-a' })],
       rounds: [makeRound({ status: 'PLAYING' })],
-      plays: [makePlay('player-a')]
+      playedCards: [makePlayedCards('player-a')]
     });
 
     const snapshot = await service.getRoundSnapshot(ROOM_CODE);
@@ -275,7 +275,7 @@ describe('RoomService.getRoundSnapshot', () => {
       room: makeRoom(),
       players: [judge(), makePlayer({ id: 'player-a' })],
       rounds: [makeRound({ status: 'JUDGING' })],
-      plays: [makePlay('player-a')]
+      playedCards: [makePlayedCards('player-a')]
     });
 
     const snapshot = await service.getRoundSnapshot(ROOM_CODE);
@@ -305,7 +305,7 @@ describe('RoomService "everyone has played" across a Judge rotation', () => {
 
     expect(contenders).toContain('player-judge');
     expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(true);
-    const plays = await service.getRoundPlayedCards(ROOM_CODE, 2);
-    expect(plays.map(play => play.player.id).sort()).toEqual(contenders.sort());
+    const playedCards = await service.getRoundPlayedCards(ROOM_CODE, 2);
+    expect(playedCards.map(entry => entry.player.id).sort()).toEqual(contenders.sort());
   });
 });

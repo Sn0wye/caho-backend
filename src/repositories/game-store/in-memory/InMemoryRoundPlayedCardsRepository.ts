@@ -3,13 +3,14 @@ import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-ca
 import type { Round, RoundPlayedCard, WhiteCard } from '@/schemas';
 import {
   type InMemoryGameTables,
-  type PlayRow,
+  type PlayedCardsRow,
   cloneRow
 } from './InMemoryGameTables';
 
 // round_played_cards + its ordered white-card pivot. Writes enforce the same
 // keys as Postgres (one answer per Round and Player, real Round/User/White
-// Cards); reads join the Player's public profile and the cards in play order.
+// Cards) and, like its transaction, store nothing when they fail. Reads join
+// the Player's public profile and the cards in submitted order.
 export class InMemoryRoundPlayedCardsRepository
   implements IRoundPlayedCardsRepository
 {
@@ -17,24 +18,36 @@ export class InMemoryRoundPlayedCardsRepository
 
   constructor(private readonly tables: InMemoryGameTables) {}
 
+  /**
+   * Record a Player's Played Cards for a Round, all or nothing.
+   *
+   * @example
+   * await store.playedCards.create({ roundId: 'round-1', playerId: 'player-a', whiteCardIds: ['w3', 'w1'] });
+   */
   async create(
-    data: CreateRoundPlayedCardDTO
+    answer: CreateRoundPlayedCardDTO
   ): Promise<Omit<RoundPlayedCard, 'player' | 'whiteCards'>> {
-    this.assertReferencesExist(data);
-    this.assertFirstPlay(data);
+    this.assertReferencesExist(answer);
+    this.assertFirstAnswer(answer);
     const now = new Date();
-    const row: PlayRow = {
+    const row: PlayedCardsRow = {
       id: `played-${this.nextId++}`,
-      roundId: data.roundId,
-      playerId: data.playerId,
-      whiteCardIds: [...data.whiteCardIds],
+      roundId: answer.roundId,
+      playerId: answer.playerId,
+      whiteCardIds: [...answer.whiteCardIds],
       createdAt: now,
       updatedAt: now
     };
-    this.tables.plays.push(row);
+    this.tables.playedCards.push(row);
     return { id: row.id, roundId: row.roundId, createdAt: now, updatedAt: now };
   }
 
+  /**
+   * Every Played Cards entry of a Room's Round; [] when the Round is unknown.
+   *
+   * @example
+   * const playedCards = await store.playedCards.findByRoomCodeAndRoundNumber('ABC123', 1);
+   */
   async findByRoomCodeAndRoundNumber(
     roomCode: string,
     roundNumber: number
@@ -42,9 +55,9 @@ export class InMemoryRoundPlayedCardsRepository
     const round = this.findRound(roomCode, roundNumber);
     if (!round) return [];
 
-    return this.tables.plays
-      .filter(play => play.roundId === round.id)
-      .map(play => this.toPlayedCard(play));
+    return this.tables.playedCards
+      .filter(row => row.roundId === round.id)
+      .map(row => this.toPlayedCards(row));
   }
 
   private findRound(roomCode: string, roundNumber: number): Round | undefined {
@@ -53,11 +66,12 @@ export class InMemoryRoundPlayedCardsRepository
     );
   }
 
-  private assertReferencesExist(data: CreateRoundPlayedCardDTO): void {
+  private assertReferencesExist(answer: CreateRoundPlayedCardDTO): void {
+    const { roundId, playerId, whiteCardIds } = answer;
     const missing = [
-      this.tables.rounds.has(data.roundId) ? null : `Round "${data.roundId}"`,
-      this.tables.users.has(data.playerId) ? null : `User "${data.playerId}"`,
-      ...data.whiteCardIds.map(id =>
+      this.tables.rounds.has(roundId) ? null : `Round "${roundId}"`,
+      this.tables.users.has(playerId) ? null : `User "${playerId}"`,
+      ...whiteCardIds.map(id =>
         this.findWhiteCard(id) ? null : `White Card "${id}"`
       )
     ].filter(Boolean);
@@ -69,16 +83,15 @@ export class InMemoryRoundPlayedCardsRepository
     }
   }
 
-  private assertFirstPlay(data: CreateRoundPlayedCardDTO): void {
-    const played = this.tables.plays.some(
-      play => play.roundId === data.roundId && play.playerId === data.playerId
+  private assertFirstAnswer(answer: CreateRoundPlayedCardDTO): void {
+    const { playerId, roundId, whiteCardIds } = answer;
+    const answered = this.tables.playedCards.some(
+      row => row.roundId === roundId && row.playerId === playerId
     );
-    const repeatsCard =
-      new Set(data.whiteCardIds).size !== data.whiteCardIds.length;
-    if (played || repeatsCard) {
-      const { playerId, roundId, whiteCardIds } = data;
+    const repeatsCard = new Set(whiteCardIds).size !== whiteCardIds.length;
+    if (answered || repeatsCard) {
       throw new Error(
-        `Unique violation on round_played_cards: Player "${playerId}" in Round "${roundId}" with cards [${whiteCardIds}] (expected one play per Player, each card once)`
+        `Unique violation on round_played_cards: Player "${playerId}" in Round "${roundId}" with cards [${whiteCardIds}] (expected one answer per Player, each card once)`
       );
     }
   }
@@ -87,19 +100,19 @@ export class InMemoryRoundPlayedCardsRepository
     return this.tables.whiteCards.find(card => card.id === id);
   }
 
-  private toPlayedCard(play: PlayRow): RoundPlayedCard {
-    const profile = this.tables.users.get(play.playerId);
+  private toPlayedCards(row: PlayedCardsRow): RoundPlayedCard {
+    const profile = this.tables.users.get(row.playerId);
     return cloneRow({
-      id: play.id,
-      roundId: play.roundId,
+      id: row.id,
+      roundId: row.roundId,
       player: profile ?? {
-        id: play.playerId,
-        username: play.playerId,
+        id: row.playerId,
+        username: row.playerId,
         avatarUrl: null
       },
-      whiteCards: play.whiteCardIds.flatMap(id => this.findWhiteCard(id) ?? []),
-      createdAt: play.createdAt,
-      updatedAt: play.updatedAt
+      whiteCards: row.whiteCardIds.flatMap(id => this.findWhiteCard(id) ?? []),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
     });
   }
 }

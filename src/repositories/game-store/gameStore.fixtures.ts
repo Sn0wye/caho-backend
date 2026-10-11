@@ -1,3 +1,4 @@
+import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
 import type { BlackCard } from '@/repositories/cards';
 import type { Player, PublicUser, Room, Round, WhiteCard } from '@/schemas';
 import type { IGameStore } from './IGameStore';
@@ -19,20 +20,36 @@ export type UserRegistry = {
   registerUser(user: PublicUser): Promise<void>;
 };
 
-export const IN_MEMORY_USERS: UserRegistry = {
-  async ensureUser(): Promise<void> {},
-  async registerUser(): Promise<void> {}
-};
+/**
+ * User registry for the in-memory store, which has no users table: it keeps
+ * the profile a Player joins with, so there is nothing to register up front.
+ *
+ * @example
+ * await seedGame(store, seed, new InMemoryUserRegistry());
+ */
+export class InMemoryUserRegistry implements UserRegistry {
+  async ensureUser(_id: string): Promise<void> {}
+
+  async registerUser(_user: PublicUser): Promise<void> {}
+}
 
 export type CardPool = { whiteCards: WhiteCard[]; blackCards: BlackCard[] };
 
 // One adapter under gameStore.contract.
-export type GameStoreHarness = UserRegistry & {
+export type GameStoreHarness = {
   name: string;
+  // Backs the hostId/judgeId/playerId references seeds make.
+  users: UserRegistry;
   // A store with no game data, holding only `pool` as its card catalogue.
   open(pool: CardPool): Promise<IGameStore>;
 };
 
+/**
+ * A Player (active, no score, empty Hand) with overrides.
+ *
+ * @example
+ * makePlayer({ id: 'player-a', cardIds: ['w1'] });
+ */
 export function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
     id: 'player-1',
@@ -48,6 +65,12 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
   };
 }
 
+/**
+ * An IN_PROGRESS Room on Round 1, judged by 'player-judge', with overrides.
+ *
+ * @example
+ * makeRoom({ status: 'LOBBY', round: 0, judgeId: null });
+ */
 export function makeRoom(overrides: Partial<Room> = {}): Room {
   return {
     id: 'room-1',
@@ -70,6 +93,12 @@ export function makeRoom(overrides: Partial<Room> = {}): Room {
   };
 }
 
+/**
+ * Round 1 of ROOM_CODE, PLAYING with no deadlines, with overrides.
+ *
+ * @example
+ * makeRound({ status: 'JUDGING', judgeDeadline: new Date() });
+ */
 export function makeRound(overrides: Partial<Round> = {}): Round {
   return {
     id: 'round-1',
@@ -87,10 +116,22 @@ export function makeRound(overrides: Partial<Round> = {}): Round {
   };
 }
 
+/**
+ * A White Card in the fixture pack, its text derived from the id.
+ *
+ * @example
+ * makeWhiteCard('w1'); // { id: 'w1', text: 'white w1', packId: 'fake-pack' }
+ */
 export function makeWhiteCard(id: string): WhiteCard {
   return { id, text: `white ${id}`, packId: CARD_PACK_ID };
 }
 
+/**
+ * A pick-1 Black Card in the fixture pack, with overrides.
+ *
+ * @example
+ * makeBlackCard({ id: 'black-2', pick: 2 });
+ */
 export function makeBlackCard(overrides: Partial<BlackCard> = {}): BlackCard {
   return {
     id: 'black-1',
@@ -110,7 +151,7 @@ export function makeBlackCard(overrides: Partial<BlackCard> = {}): BlackCard {
 export async function seedRoom(
   store: IGameStore,
   room: Room,
-  users: UserRegistry = IN_MEMORY_USERS
+  users: UserRegistry = new InMemoryUserRegistry()
 ): Promise<Room> {
   const referenced = [room.hostId, room.judgeId, room.prevJudgeId];
   for (const id of referenced) {
@@ -130,7 +171,7 @@ export async function seedPlayer(
   store: IGameStore,
   roomCode: string,
   player: Player,
-  users: UserRegistry = IN_MEMORY_USERS
+  users: UserRegistry = new InMemoryUserRegistry()
 ): Promise<void> {
   const { id, username, avatarUrl } = player;
   await users.registerUser({ id, username, avatarUrl });
@@ -148,20 +189,20 @@ export async function seedPlayer(
  * Record a Player's Played Cards for a Round through the store.
  *
  * @example
- * await seedPlay(store, { roundId: 'round-1', playerId: 'player-a', whiteCardIds: ['w1'] });
+ * await seedPlayedCards(store, { roundId: 'round-1', playerId: 'player-a', whiteCardIds: ['w1'] });
  */
-export async function seedPlay(
+export async function seedPlayedCards(
   store: IGameStore,
-  play: { roundId: string; playerId: string; whiteCardIds: string[] }
+  answer: CreateRoundPlayedCardDTO
 ): Promise<void> {
-  await store.playedCards.create(play);
+  await store.playedCards.create(answer);
 }
 
 export type GameSeed = {
   room: Room;
   players?: Player[];
   rounds?: Round[];
-  plays?: Array<{ roundId: string; playerId: string; whiteCardIds: string[] }>;
+  playedCards?: CreateRoundPlayedCardDTO[];
 };
 
 /**
@@ -173,7 +214,7 @@ export type GameSeed = {
 export async function seedGame(
   store: IGameStore,
   seed: GameSeed,
-  users: UserRegistry = IN_MEMORY_USERS
+  users: UserRegistry = new InMemoryUserRegistry()
 ): Promise<void> {
   await seedRoom(store, seed.room, users);
   for (const player of seed.players ?? []) {
@@ -182,8 +223,8 @@ export async function seedGame(
   for (const round of seed.rounds ?? []) {
     await store.rounds.create(round);
   }
-  for (const play of seed.plays ?? []) {
-    await seedPlay(store, play);
+  for (const answer of seed.playedCards ?? []) {
+    await seedPlayedCards(store, answer);
   }
 }
 
@@ -207,6 +248,6 @@ export async function openWithRounds(
   rounds: Round[]
 ): Promise<IGameStore> {
   const store = await harness.open(CONTRACT_POOL);
-  await seedGame(store, { room: makeRoom(), rounds }, harness);
+  await seedGame(store, { room: makeRoom(), rounds }, harness.users);
   return store;
 }
