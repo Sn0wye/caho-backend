@@ -426,6 +426,19 @@ describe('RoomOrchestrator.endRoom', () => {
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
+        event: {
+          event: 'room.round-end',
+          payload: {
+            roundNumber: 1,
+            winner: null,
+            winnerId: null,
+            newScore: null,
+            reason: 'aborted'
+          }
+        }
+      },
+      {
+        channel: ROOM_CODE,
         event: { event: 'room.game-end', payload: ranking }
       }
     ]);

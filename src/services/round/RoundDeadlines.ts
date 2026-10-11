@@ -101,5 +101,11 @@ export class RoundDeadlines {
       return;
     }
     await this.rounds.update(round.id, { judgeDeadline: null });
+    // Judging may have opened since `round` was read, skipping its window
+    // because the grace was still set; without one the Round never ends.
+    const current = await this.rounds.findById(round.id);
+    if (current?.status === 'JUDGING') {
+      await this.armJudgingWindow(round.id);
+    }
   }
 }

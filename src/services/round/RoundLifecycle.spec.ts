@@ -290,6 +290,31 @@ describe('the Judge', () => {
     expect(table.timers.armed.get(judgeKey(ROUND_ID))).toBe(90);
   });
 
+  it('arms the judging window when judging opens while the Judge is reconnecting', async () => {
+    const table = await buildTable();
+    await table.rounds.onPlayerDropped(ROOM_CODE, JUDGE_ID);
+    await playAll(table, ['player-a']);
+    table.timers.beforeClear = () => playAll(table, ['player-b']);
+
+    await table.rounds.onPlayerReturned(ROOM_CODE, JUDGE_ID);
+
+    expect(await phaseOf(table)).toBe('JUDGING');
+    expect(table.timers.armed.get(judgeKey(ROUND_ID))).toBe(90);
+    expect((await table.store.rounds.findById(ROUND_ID))?.judgeDeadline).not.toBeNull();
+  });
+
+  it('ignores a grace expiry that arrives after the Judge reconnected', async () => {
+    const table = await buildTable();
+    await table.service.setPlayerActive(ROOM_CODE, JUDGE_ID, false);
+    await table.rounds.onPlayerDropped(ROOM_CODE, JUDGE_ID);
+
+    await table.service.setPlayerActive(ROOM_CODE, JUDGE_ID, true);
+    await table.rounds.onPlayerReturned(ROOM_CODE, JUDGE_ID);
+    await table.rounds.onExpired(graceKey(ROUND_ID));
+
+    expect(await phaseOf(table)).toBe('PLAYING');
+  });
+
   it('aborts and rotates at once when the Judge leaves', async () => {
     const table = await buildTable();
 
@@ -422,15 +447,18 @@ describe('the Judge pick', () => {
 });
 
 describe('ending the game', () => {
-  it('aborts the active Round so its pending deadlines become no-ops', async () => {
+  it('aborts the active Round once, announcing it, and leaves its deadlines no-ops', async () => {
     const table = await buildTable();
 
     await table.rounds.endActiveRound(ROOM_CODE);
     await table.service.endGame(ROOM_CODE);
+    await table.rounds.endActiveRound(ROOM_CODE);
     await table.rounds.onExpired(playKey(ROUND_ID));
 
     expect(await phaseOf(table)).toBe('ABORTED');
-    expect(table.publisher.published).toEqual([]);
+    expect(table.publisher.published.map(({ event }) => event)).toEqual([
+      { event: 'room.round-end', payload: { roundNumber: 1, winner: null, winnerId: null, newScore: null, reason: 'aborted' } }
+    ]);
   });
 });
 

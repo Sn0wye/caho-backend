@@ -5,6 +5,9 @@ import type { IRoundTimerStore } from './IRoundTimerStore';
 export class FakeRoundTimerStore implements IRoundTimerStore {
   public readonly armed = new Map<string, number>();
   public readonly cleared: string[] = [];
+  // Runs inside clear(), before it returns, so a spec can land a concurrent
+  // event in the gap between cancelling a deadline and the caller's next step.
+  public beforeClear?: (key: string) => Promise<void>;
 
   async arm(key: string, ttlSeconds: number): Promise<void> {
     this.armed.set(key, ttlSeconds);
@@ -13,6 +16,7 @@ export class FakeRoundTimerStore implements IRoundTimerStore {
   async clear(key: string): Promise<void> {
     this.cleared.push(key);
     this.armed.delete(key);
+    await this.beforeClear?.(key);
   }
 
   /**

@@ -70,8 +70,7 @@ export class RoundLifecycle {
     this.clocks = new RoundDeadlines(timerStore, store.rounds, config, log);
   }
 
-  // Open Round 1 after the Host started the Room (RoomService.startGame picked
-  // its Judge and Black Card so room.started could carry them).
+  // Open Round 1; RoomService.startGame picked its Judge and Black Card.
   public async startFirstRound(
     roomCode: string,
     judgeId: string,
@@ -80,9 +79,8 @@ export class RoundLifecycle {
     return await this.openRound(roomCode, 1, judgeId, blackCard);
   }
 
-  // A Player submits their answer. Broadcasts the ready flag to the Room and the
-  // refilled Hand back to that Player, then moves to judging once every active
-  // Player has played. The play rules live in RoomService. issue #1.
+  // A Player answers: broadcast their ready flag and refilled Hand, then judge
+  // once every active Player has played. Rules live in RoomService. issue #1.
   public async playCards(
     roomCode: string,
     playerId: string,
@@ -136,9 +134,8 @@ export class RoundLifecycle {
     await this.continueAfterPick(round, score);
   }
 
-  // A Player's connection dropped (ADR-0002). A dropped Judge holds the Round on
-  // the grace deadline; anyone else stops being awaited, so the Round may now be
-  // ready for judging instead of waiting out the play deadline.
+  // A Player dropped (ADR-0002). A dropped Judge holds the Round on grace;
+  // anyone else stops being awaited, so judging may open without the deadline.
   public async onPlayerDropped(
     roomCode: string,
     playerId: string
@@ -176,7 +173,8 @@ export class RoundLifecycle {
 
   // Entry point for a Redis expired-key event. Keys that aren't ours (the
   // keyspace is shared) are ignored. A lapsed judging window or Judge grace
-  // aborts and rotates. See ADR-0003.
+  // aborts and rotates, except a grace whose Judge is back: its event can still
+  // be in flight when the reconnect cancels the key. See ADR-0002/0003.
   public async onExpired(expiredKey: string): Promise<void> {
     const parsed = parseDeadlineKey(expiredKey);
     const round = parsed
@@ -187,6 +185,9 @@ export class RoundLifecycle {
     }
     if (parsed.kind === 'play') {
       await this.onPlayExpired(round);
+      return;
+    }
+    if (parsed.kind === 'grace' && (await this.judgeIsBack(round))) {
       return;
     }
     await this.abortAndRotate(round);
@@ -217,16 +218,25 @@ export class RoundLifecycle {
   }
 
   // The game is ending (Host /end, or the Host left with no heir): abort the
-  // Room's current Round so its pending deadlines become no-ops. Without this a
+  // Room's current Round, announced like any abort but with no rotation, so its
+  // pending deadlines become no-ops. Without this a
   // finished game kept rotating Rounds when the timers fired. ADR-0003.
   public async endActiveRound(roomCode: string): Promise<void> {
     const room = await this.store.rooms.getRoomByCode(roomCode);
     const round = room
       ? await this.store.rounds.find(roomCode, room.round)
       : null;
-    if (round) {
-      await this.abortRound(round);
+    if (round && (await this.abortRound(round))) {
+      await this.publishRoundEnd(round, ABORTED);
     }
+  }
+
+  private async judgeIsBack(round: Round): Promise<boolean> {
+    const judge = await this.store.players.getPlayerFromRoom(
+      round.roomCode,
+      round.judgeId
+    );
+    return judge?.isActive === true;
   }
 
   private async continueAfterPick(
@@ -260,7 +270,7 @@ export class RoundLifecycle {
     );
     if (!claimed) {
       throw new BadRequestError(
-        `A rodada ${round.roundNumber} já foi decidida.`
+        `A rodada ${round.roundNumber} (${round.id}) já foi decidida (esperado: JUDGING).`
       );
     }
     await this.store.rounds.update(round.id, { roundWinnerId: winner.id });
@@ -285,10 +295,9 @@ export class RoundLifecycle {
     return round && ACTIVE_PHASES.includes(round.status) ? round : null;
   }
 
-  // Checked after every play and after every non-Judge drop or leave: before
-  // #25 it ran only on a play, so losing the last Player owed a play stalled
-  // the Round until the deadline. With no plays at all (everyone else gone) the
-  // play deadline aborts it instead.
+  // Run after every play and every non-Judge drop or leave; before #25 only a
+  // play checked, so losing the last Player owed a play stalled the Round. With
+  // no plays at all (everyone else gone) the play deadline aborts it instead.
   private async advanceIfAllPlayed(round: Round | null): Promise<void> {
     if (
       round?.status !== 'PLAYING' ||
