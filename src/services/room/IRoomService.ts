@@ -1,6 +1,7 @@
 import type { CreateRoomDTO } from '@/dto/CreateRoom';
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
+import type { BlackCard as DrawnBlackCard } from '@/repositories/cards';
 import type {
   BlackCard,
   Player,
@@ -10,7 +11,6 @@ import type {
   Round,
   RoundPlayedCard,
   RoundStatus,
-  RoundWithRelations,
   WhiteCard
 } from '@/schemas';
 
@@ -34,7 +34,6 @@ export interface IRoomService {
     isActive: boolean
   ): Promise<Player>;
   togglePlayerReady(roomCode: string, playerId: string): Promise<Player>;
-  allActivePlayersPlayed(roomCode: string): Promise<boolean>;
   getRoomPlayers(roomCode: string): Promise<Player[]>;
   getRoomBlackCardId(roomCode: string): Promise<string | null>;
   updatePlayerInRoom(
@@ -59,8 +58,6 @@ export interface IRoomService {
     playerId: string,
     playedCardIds: string[]
   ): Promise<PlayResult>;
-  createRound(data: CreateRoundDTO): Promise<Round>;
-  startNextRound(roomCode: string, currentRound: number): Promise<NextRound>;
   getRoundPlayedCards(
     roomCode: string,
     roundNumber: number
@@ -68,7 +65,8 @@ export interface IRoomService {
   getActiveRound(roomCode: string): Promise<Round | null>;
   getRoundSnapshot(roomCode: string): Promise<RoundSnapshot | null>;
   getRoundNumber(roomCode: string): Promise<number>;
-  processJudgeChooseWinner(data: JudgeChooseWinnerDTO): Promise<JudgePickResult>;
+  checkJudgePick(data: JudgeChooseWinnerDTO): Promise<JudgePick>;
+  scoreRoundWinner(room: Room, winnerPlayerId: string): Promise<RoundScore>;
   dealInitialHands(data: {
     roomCode: string;
     cardsPerPlayer: number;
@@ -79,20 +77,19 @@ export interface IRoomService {
 export type DealtHand = { playerId: string; cards: WhiteCard[] };
 
 // A started game: the IN_PROGRESS Room, every Player (unready, Hands dealt),
-// Round 1 and its Black Card, and each Player's Hand for their private channel.
+// Round 1's Judge and Black Card, and each Player's Hand for their private
+// channel. RoundLifecycle opens Round 1 from the Judge and Black Card (#25).
 export type GameStart = {
   room: Room;
   players: Player[];
-  round: Round;
-  blackCard: BlackCard;
+  judgeId: string;
+  blackCard: DrawnBlackCard;
   hands: DealtHand[];
 };
 
 // A Player's accepted answer: the Player as stored afterwards (isReady true) and
 // the White Cards dealt to refill their Hand.
 export type PlayResult = { player: Player; cardsDrawn: WhiteCard[] };
-
-export type NextRound = RoundWithRelations & { blackCard: BlackCard };
 
 // REST view of the current Round for a (re)connecting client. Played Cards are
 // empty until the Round reaches judging.
@@ -122,12 +119,18 @@ export type JudgeChooseWinnerDTO = {
   roomCode: string;
 };
 
-// Outcome of the Judge's pick. `winnerPlayer` carries the updated score for the
+// A Judge's pick that passed the rules: the Round being judged and the winning
+// Played Card. RoundLifecycle claims the Round before scoring it (#25).
+export type JudgePick = {
+  room: Room;
+  round: Round;
+  winner: RoundPlayedCard;
+};
+
+// Outcome of scoring the pick. `winnerPlayer` carries the updated score for the
 // `room.round-end` broadcast; when the win-condition is met `gameEnded` is
 // true and `ranking` holds the final Ranking for `room.game-end`. See issue #1.
-export type JudgePickResult = {
-  room: Room;
-  winner: RoundPlayedCard;
+export type RoundScore = {
   winnerPlayer: Player;
   gameEnded: boolean;
   ranking: Ranking | null;

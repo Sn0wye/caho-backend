@@ -2,27 +2,25 @@ import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import { BadRequestError } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
 import { toRoomPlayer } from '@/schemas';
-import type { Ranking, Room, Round } from '@/schemas';
+import type { Ranking, Room } from '@/schemas';
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
-import type { IRoomClock } from '@/services/round/IJudgeClock';
+import type { RoundLifecycle } from '@/services/round/RoundLifecycle';
 import type { Logger } from 'pino';
 import type { IRoomOrchestratorService } from './IRoomOrchestratorService';
 import type { GameStart } from './IRoomService';
 import { HAND_SIZE } from './gameRules';
 
-// Departure mode: an explicit Leave aborts the Round and rotates the Judge now; a
-// connection drop holds the Round on the grace timer awaiting reconnect. ADR-0002.
-type DepartureMode = 'leave' | 'drop';
-
-// Orchestrates Room membership and lifecycle (join, leave, end, presence) and owns
-// the broadcasts that follow. Pulled out of the Fastify controllers and the WS
-// handler so HTTP/WS only parse in/serialize out, and the status-dependent Host /
-// Judge departure fallout lives in one tested place shared by the REST Leave path
-// and the WebSocket drop path. Emission lives here, never in a controller. ADR-0004.
+// Orchestrates Room membership and lifecycle (join, ready, leave, start, end,
+// presence) and owns the broadcasts that follow. Pulled out of the Fastify
+// controllers and the WS handler so HTTP/WS only parse in/serialize out, and the
+// status-dependent Host fallout lives in one tested place shared by the REST
+// Leave path and the WebSocket drop path. Presence changes are passed on to
+// RoundLifecycle, which decides what they mean for the Round (#25). Emission
+// lives here or in RoundLifecycle, never in a controller. ADR-0004.
 export class RoomOrchestrator {
   constructor(
     private readonly rooms: IRoomOrchestratorService,
-    private readonly judgeClock: IRoomClock,
+    private readonly rounds: RoundLifecycle,
     private readonly publisher: IGameEventPublisher,
     private readonly log?: Logger
   ) {}
@@ -58,10 +56,20 @@ export class RoomOrchestrator {
     });
   }
 
+  // Lobby ready toggle; RoomService rejects it outside LOBBY. Broadcast the
+  // change to the Room.
+  public async playerReady(roomCode: string, playerId: string): Promise<void> {
+    const player = await this.rooms.togglePlayerReady(roomCode, playerId);
+    await this.publisher.publish(roomCode, {
+      event: 'room.player-update',
+      payload: toRoomPlayer(player)
+    });
+  }
+
   // The Host starts the game. Seeds the whole IN_PROGRESS state in one
   // self-contained message (sanitized Room — never the password — plus every
-  // Player as a RoomPlayer), sends each Hand only to its owner, arms Round 1's
-  // play clock (ADR-0003) and announces it. Was inline in the start-room
+  // Player as a RoomPlayer), sends each Hand only to its owner, then has
+  // RoundLifecycle open and announce Round 1. Was inline in the start-room
   // controller; emission belongs here (ADR-0004/0005).
   public async startRoom(roomCode: string, requesterId: string): Promise<void> {
     const start = await this.rooms.startGame(roomCode, requesterId);
@@ -72,20 +80,16 @@ export class RoomOrchestrator {
       payload: { room, players: start.players.map(toRoomPlayer) }
     });
     await this.publishHands(start);
-    await this.judgeClock.armPlayDeadline(start.round.id);
-    await this.publisher.publish(roomCode, {
-      event: 'room.round-start',
-      payload: {
-        roundNumber: start.round.roundNumber,
-        judgeId: start.round.judgeId,
-        blackCard: start.blackCard
-      }
-    });
+    const round = await this.rounds.startFirstRound(
+      roomCode,
+      start.judgeId,
+      start.blackCard
+    );
     this.log?.info(
       {
         event: 'room.started',
         roomCode,
-        roundId: start.round.id,
+        roundId: round.id,
         playerCount: start.players.length
       },
       'Room started'
@@ -101,8 +105,8 @@ export class RoomOrchestrator {
     }
   }
 
-  // Explicit Leave: remove the Player, announce it, then resolve the Host and Judge
-  // fallout. The Room's hostId/judgeId outlive the deleted Player row, so the
+  // Explicit Leave: remove the Player, announce it, then resolve the Host and
+  // Round fallout. The Room's hostId/judgeId outlive the deleted Player row, so the
   // departure reads still resolve correctly here. issue #3 / ADR-0002.
   public async leaveRoom(roomCode: string, playerId: string): Promise<void> {
     await this.rooms.leaveRoom({ roomCode, playerId });
@@ -111,7 +115,7 @@ export class RoomOrchestrator {
       payload: { id: playerId }
     });
     await this.broadcastHostDeparture(roomCode, playerId);
-    await this.handleJudgeDeparture(roomCode, playerId, 'leave');
+    await this.rounds.onPlayerLeft(roomCode, playerId);
     this.log?.info(
       { event: 'room.player_left', roomCode, playerId },
       'Player left Room'
@@ -129,6 +133,7 @@ export class RoomOrchestrator {
       throw new BadRequestError(ROOM_ERRORS.IS_NOT_ROOM_HOST);
     }
 
+    await this.rounds.endActiveRound(roomCode);
     const ranking = await this.rooms.endGame(roomCode);
     await this.publisher.publish(roomCode, {
       event: 'room.game-end',
@@ -141,9 +146,9 @@ export class RoomOrchestrator {
     return ranking;
   }
 
-  // Presence change for one Room (ADR-0002): broadcast the Player's active flag, and
-  // on a drop resolve the same Host/Judge fallout as a Leave — a drop holds the
-  // Round on grace rather than aborting. A reconnect only re-activates.
+  // Presence change for one Room (ADR-0002): broadcast the Player's active flag,
+  // resolve the Host fallout of a drop, and tell RoundLifecycle (a dropped Judge
+  // holds the Round on grace rather than aborting it).
   public async markPresence(
     roomCode: string,
     playerId: string,
@@ -164,12 +169,12 @@ export class RoomOrchestrator {
     });
 
     if (isActive) {
-      await this.handleJudgeReturn(roomCode, playerId);
+      await this.rounds.onPlayerReturned(roomCode, playerId);
       return;
     }
 
     await this.handleHostDrop(roomCode, playerId);
-    await this.handleJudgeDeparture(roomCode, playerId, 'drop');
+    await this.rounds.onPlayerDropped(roomCode, playerId);
   }
 
   // A dropped socket is not a Leave (ADR-0002). In LOBBY there is no game to keep
@@ -182,30 +187,6 @@ export class RoomOrchestrator {
       return;
     }
     await this.broadcastHostDeparture(roomCode, playerId);
-  }
-
-  // A reconnecting Judge resumes their held Round instead of having it aborted
-  // when the grace lapses. ADR-0002.
-  private async handleJudgeReturn(
-    roomCode: string,
-    playerId: string
-  ): Promise<void> {
-    const round = await this.judgedRound(roomCode, playerId);
-    if (round) {
-      await this.judgeClock.onJudgeReturned(round.id);
-    }
-  }
-
-  // The in-progress Round this Player is judging, or null.
-  private async judgedRound(
-    roomCode: string,
-    playerId: string
-  ): Promise<Round | null> {
-    const room = await this.rooms.getRoom(roomCode);
-    if (room.status !== 'IN_PROGRESS' || room.judgeId !== playerId) {
-      return null;
-    }
-    return await this.rooms.getActiveRound(roomCode);
   }
 
   public playerRoomCodes(playerId: string): Promise<string[]> {
@@ -238,6 +219,7 @@ export class RoomOrchestrator {
     }
 
     if (outcome.kind === 'room-ended') {
+      await this.rounds.endActiveRound(roomCode);
       this.log?.info(
         { event: 'room.ended', roomCode, reason: 'host_departed' },
         'Room ended after Host departure'
@@ -247,26 +229,5 @@ export class RoomOrchestrator {
         payload: outcome.ranking
       });
     }
-  }
-
-  // Resolve a departing Judge: nothing happens unless the Player actually holds the
-  // Judge role in an in-progress Round. A drop arms the grace timer; an explicit
-  // Leave expires it now to abort+rotate. (Was http/handleJudgeLoss.) ADR-0002/0003.
-  private async handleJudgeDeparture(
-    roomCode: string,
-    playerId: string,
-    mode: DepartureMode
-  ): Promise<void> {
-    const round = await this.judgedRound(roomCode, playerId);
-    if (!round) {
-      return;
-    }
-
-    if (mode === 'drop') {
-      await this.judgeClock.armJudgeGrace(round.id);
-      return;
-    }
-
-    await this.judgeClock.onJudgeExpired(round.id);
   }
 }

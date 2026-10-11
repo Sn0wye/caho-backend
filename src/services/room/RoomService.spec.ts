@@ -9,71 +9,36 @@ import {
   makeRound
 } from './RoomService.fixtures';
 
-describe('RoomService.processJudgeChooseWinner', () => {
-  let judge: Player;
-  let winner: Player;
-
-  beforeEach(() => {
-    judge = makePlayer({ id: 'player-judge', isJudge: true });
-    winner = makePlayer({ id: 'player-winner', score: 0 });
-  });
-
-  it('awards one point to the winning Player', async () => {
+describe('RoomService.scoreRoundWinner', () => {
+  async function scoreWinner(maxPoints: number, score: number) {
     const { service } = await buildService({
-      room: makeRoom({ maxPoints: 5 }),
-      players: [judge, winner],
-      rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCards('player-winner')]
+      room: makeRoom({ maxPoints }),
+      players: [
+        makePlayer({ id: 'player-judge' }),
+        makePlayer({ id: 'player-winner', score })
+      ],
+      rounds: [makeRound({ status: 'COMPLETE' })]
     });
+    const room = await service.getRoom(ROOM_CODE);
+    return { service, result: await service.scoreRoundWinner(room, 'player-winner') };
+  }
 
-    const result = await service.processJudgeChooseWinner({
-      roomCode: ROOM_CODE,
-      judgePlayerId: 'player-judge',
-      winnerPlayerId: 'player-winner'
-    });
+  it('awards one point and keeps the game going below maxPoints', async () => {
+    const { result } = await scoreWinner(5, 0);
 
     expect(result.winnerPlayer.score).toBe(1);
-  });
-
-  it('keeps the game going when the winner is below maxPoints', async () => {
-    const { service } = await buildService({
-      room: makeRoom({ maxPoints: 5 }),
-      players: [judge, makePlayer({ id: 'player-winner', score: 0 })],
-      rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCards('player-winner')]
-    });
-
-    const result = await service.processJudgeChooseWinner({
-      roomCode: ROOM_CODE,
-      judgePlayerId: 'player-judge',
-      winnerPlayerId: 'player-winner'
-    });
-
     expect(result.gameEnded).toBe(false);
     expect(result.ranking).toBeNull();
   });
 
   it('ends the game when the winner reaches maxPoints', async () => {
-    const { service } = await buildService({
-      room: makeRoom({ maxPoints: 2 }),
-      players: [judge, makePlayer({ id: 'player-winner', score: 1 })],
-      rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCards('player-winner')]
-    });
-
-    const result = await service.processJudgeChooseWinner({
-      roomCode: ROOM_CODE,
-      judgePlayerId: 'player-judge',
-      winnerPlayerId: 'player-winner'
-    });
+    const { service, result } = await scoreWinner(2, 1);
 
     expect(result.gameEnded).toBe(true);
     expect(result.ranking?.[0]).toEqual(
       expect.objectContaining({ id: 'player-winner', score: 2 })
     );
-
-    const room = await service.getRoom(ROOM_CODE);
-    expect(room.status).toBe('FINISHED');
+    expect((await service.getRoom(ROOM_CODE)).status).toBe('FINISHED');
   });
 });
 
@@ -316,34 +281,5 @@ describe('RoomService.getActiveRound', () => {
     });
 
     expect(await service.getActiveRound(ROOM_CODE)).toBeNull();
-  });
-});
-
-describe('RoomService.allActivePlayersPlayed', () => {
-  it('ignores Inactive Players when all active Players have played', async () => {
-    const { service } = await buildService({
-      room: makeRoom(),
-      players: [
-        makePlayer({ id: 'player-judge', isJudge: true }),
-        makePlayer({ id: 'player-active', isReady: true }),
-        makePlayer({ id: 'player-dropped', isActive: false, isReady: false })
-      ],
-      rounds: [],
-    });
-
-    expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(true);
-  });
-
-  it('is false while an active non-Judge Player has not played', async () => {
-    const { service } = await buildService({
-      room: makeRoom(),
-      players: [
-        makePlayer({ id: 'player-judge', isJudge: true }),
-        makePlayer({ id: 'player-active', isReady: false })
-      ],
-      rounds: [],
-    });
-
-    expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(false);
   });
 });

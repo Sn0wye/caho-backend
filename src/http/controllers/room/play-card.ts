@@ -1,10 +1,10 @@
 import type { App } from '@/app';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoundFlowFactory } from '@/services/round/RoundFlowFactory';
+import { RoundLifecycleFactory } from '@/services/round/RoundLifecycleFactory';
 import { z } from 'zod';
 
 export const playCardsController = async (app: App) => {
-  const roundFlow = RoundFlowFactory();
+  const rounds = RoundLifecycleFactory();
 
   app.register(ensureAuth).post(
     '/:roomCode/play-cards',
@@ -25,7 +25,7 @@ export const playCardsController = async (app: App) => {
       const playedCards = req.body;
       const { roomCode } = req.params;
 
-      await roundFlow.playCards(roomCode, user.id, playedCards);
+      await rounds.playCards(roomCode, user.id, playedCards);
 
       return res.status(204).send();
     }

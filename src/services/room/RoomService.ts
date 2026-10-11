@@ -30,9 +30,9 @@ import type {
   HostLossOutcome,
   IRoomService,
   JudgeChooseWinnerDTO,
-  JudgePickResult,
-  NextRound,
+  JudgePick,
   PlayResult,
+  RoundScore,
   RoundSnapshot
 } from './IRoomService';
 import type { IWhiteCardDealer } from './IWhiteCardDealer';
@@ -107,10 +107,11 @@ export class RoomService implements IRoomService {
     }
   }
 
-  // The Host starts the game: pick the first Judge, draw the first Black Card,
-  // deal every Player a Hand and open Round 1. Moved out of the start-room
-  // controller so the rules are testable and broadcasts live in the
-  // orchestrator (ADR-0004). Hands persist across Rounds. issue #1, slice 3.
+  // The Host starts the game: pick the first Judge, draw the first Black Card
+  // and deal every Player a Hand. Moved out of the start-room controller so the
+  // rules are testable and broadcasts live in the orchestrator (ADR-0004). Hands
+  // persist across Rounds. issue #1, slice 3. Round 1 itself is opened by
+  // RoundLifecycle.startFirstRound, which owns every Round once it exists (#25).
   public async startGame(
     roomCode: string,
     requesterId: string
@@ -134,20 +135,13 @@ export class RoomService implements IRoomService {
       roomCode,
       cardsPerPlayer: HAND_SIZE
     });
-    const round = await this.createRound({
-      roomCode,
-      judgeId,
-      blackCardId: blackCard.id,
-      roundNumber: 1,
-      roundWinnerId: null
-    });
     const startedPlayers =
       await this.store.players.getRoomPlayersByCode(roomCode);
 
     return {
       room: startedRoom,
       players: startedPlayers,
-      round,
+      judgeId,
       blackCard,
       hands
     };
@@ -155,10 +149,11 @@ export class RoomService implements IRoomService {
 
   // Single end-of-game path: both the host's manual /end and the maxPoints
   // win-condition route through here so the Room reaches FINISHED and the
-  // Ranking is built exactly one way. See issue #1, slice 2.
+  // Ranking is built exactly one way. See issue #1, slice 2. The in-flight Round
+  // is aborted by the caller through RoundLifecycle.endActiveRound, the one
+  // definition of an abort (#25).
   public async endGame(roomCode: string): Promise<Ranking> {
     try {
-      await this.abortActiveRound(roomCode);
       await this.store.rooms.update(roomCode, {
         status: 'FINISHED'
       });
@@ -171,24 +166,6 @@ export class RoomService implements IRoomService {
         cause: error
       });
     }
-  }
-
-  // Close the in-flight Round so its pending play/judge timers become no-ops
-  // (their claims need PLAYING/JUDGING). Without this a finished game kept
-  // rotating Rounds when the timers fired. ADR-0003.
-  private async abortActiveRound(roomCode: string): Promise<void> {
-    const room = await this.store.rooms.getRoomByCode(roomCode);
-    const round = room
-      ? await this.store.rounds.find(roomCode, room.round)
-      : null;
-    if (!round) {
-      return;
-    }
-    await this.store.rounds.claimAdvance(
-      round.id,
-      ['PLAYING', 'JUDGING'],
-      'ABORTED'
-    );
   }
 
   public async joinRoom(input: JoinRoomDTO): Promise<Room> {
@@ -351,17 +328,6 @@ export class RoomService implements IRoomService {
     return await this.updatePlayerInRoom(roomCode, playerId, {
       isReady: !player.isReady
     });
-  }
-
-  // True once every active non-Judge Player has played this Round. Inactive
-  // Players are never awaited, so they are excluded from the count. See ADR-0002.
-  public async allActivePlayersPlayed(roomCode: string): Promise<boolean> {
-    const players = await this.store.players.getRoomPlayersByCode(roomCode);
-    const contenders = players.filter(
-      player => player.isActive && !player.isJudge
-    );
-
-    return contenders.every(player => player.isReady);
   }
 
   public async getRoomPlayers(roomCode: string): Promise<Player[]> {
@@ -544,28 +510,6 @@ export class RoomService implements IRoomService {
     }
   }
 
-  public async createRound(data: CreateRoundDTO): Promise<Round> {
-    try {
-      const round = await this.store.rounds.create({
-        id: createId(),
-        roomCode: data.roomCode,
-        judgeId: data.judgeId,
-        blackCardId: data.blackCardId,
-        roundNumber: data.roundNumber,
-        roundWinnerId: data.roundWinnerId,
-        status: 'PLAYING',
-        playDeadline: null,
-        judgeDeadline: null,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-
-      return round;
-    } catch (error) {
-      throw new InternalServerError('Erro ao criar rodada.', { cause: error });
-    }
-  }
-
   public async getRoundPlayedCards(
     roomCode: string,
     roundNumber: number
@@ -623,72 +567,15 @@ export class RoomService implements IRoomService {
     return room.round;
   }
 
-  // Open the Round after `currentRound`: rotate the Judge away from the one who
-  // just judged, draw a Black Card and reset everyone's "played" flag. Callers
-  // pass the Round they are leaving; a stale number (another path already
-  // rotated) is rejected so two paths can't open two Rounds.
-  public async startNextRound(
-    roomCode: string,
-    currentRound: number
-  ): Promise<NextRound> {
-    const room = await this.getRoom(roomCode);
-    this.assertCanRotate(room, currentRound);
-
-    const players = await this.store.players.getRoomPlayersByCode(roomCode);
-    // Exclude the Judge who just judged (room.judgeId). Excluding prevJudgeId
-    // let the same Player judge twice in a row.
-    const nextJudgeId = getRandomJudge(room.judgeId, players);
-    const blackCard = await this.blackCardDeck.drawBlackCard(roomCode);
-
-    // `isReady` doubles as "played this Round"; never resetting it locked every
-    // Player out of Round 2 with "already played".
-    await this.store.players.setPlayersAsUnready(roomCode);
-    const updatedRoom = await this.store.rooms.update(roomCode, {
-      round: currentRound + 1,
-      judgeId: nextJudgeId,
-      prevJudgeId: room.judgeId
-    });
-    const nextRound = await this.createRound({
-      roomCode,
-      judgeId: nextJudgeId,
-      blackCardId: blackCard.id,
-      roundNumber: currentRound + 1,
-      roundWinnerId: null
-    });
-
-    const judge = await this.getPlayerFromRoom(roomCode, nextJudgeId);
-    return {
-      ...nextRound,
-      room: updatedRoom,
-      judge,
-      roundWinner: null,
-      roundPlayedCards: [],
-      blackCard
-    };
-  }
-
-  private assertCanRotate(room: Room, currentRound: number): void {
-    if (room.status !== 'IN_PROGRESS') {
-      throw new BadRequestError(
-        `Não há próxima rodada: a sala ${room.code} está ${room.status}, esperado IN_PROGRESS.`
-      );
-    }
-    if (room.round !== currentRound) {
-      throw new BadRequestError(
-        `Rodada ${currentRound} já encerrada; a sala ${room.code} está na rodada ${room.round}.`
-      );
-    }
-  }
-
-  // The Judge picks the winning Played Card. Only the Room's Judge, only while
-  // the Round is JUDGING, only a Player who played. The JUDGING -> COMPLETE claim
-  // is the guard against a double-click scoring twice or a pick racing the
-  // judging deadline. Scores the winner — issue #1, slice 1.
-  public async processJudgeChooseWinner({
+  // The Judge's pick is valid: only the Room's Judge, only while the Round is
+  // JUDGING, only a Player who played. Returns the Round and the winning Played
+  // Card; RoundLifecycle then claims JUDGING -> COMPLETE, which guards a
+  // double-click or a pick racing the judging deadline (#25).
+  public async checkJudgePick({
     roomCode,
     judgePlayerId,
     winnerPlayerId
-  }: JudgeChooseWinnerDTO): Promise<JudgePickResult> {
+  }: JudgeChooseWinnerDTO): Promise<JudgePick> {
     const room = await this.getRoom(roomCode);
     if (room.judgeId !== judgePlayerId) {
       throw new ForbiddenError(
@@ -698,21 +585,25 @@ export class RoomService implements IRoomService {
 
     const round = await this.requireActiveRound(roomCode);
     const winner = await this.findWinningPlay(round, winnerPlayerId);
-    await this.claimJudgedRound(round, winner);
+    return { room, round, winner };
+  }
 
+  // Score the Round winner, then apply the win-condition: reaching maxPoints
+  // ends the game instead of dealing another Round. issue #1, slices 1-2.
+  public async scoreRoundWinner(
+    room: Room,
+    winnerPlayerId: string
+  ): Promise<RoundScore> {
     await this.incrementPlayerScore({
-      roomCode,
+      roomCode: room.code,
       playerId: winnerPlayerId,
       by: 1
     });
-    const winnerPlayer = await this.getPlayerFromRoom(roomCode, winnerPlayerId);
-
-    // Win-condition branch: reaching maxPoints ends the game instead of dealing
-    // another Round. issue #1, slice 2.
+    const winnerPlayer = await this.getPlayerFromRoom(room.code, winnerPlayerId);
     const gameEnded = winnerPlayer.score >= room.maxPoints;
-    const ranking = gameEnded ? await this.endGame(roomCode) : null;
+    const ranking = gameEnded ? await this.endGame(room.code) : null;
 
-    return { room, winner, winnerPlayer, gameEnded, ranking };
+    return { winnerPlayer, gameEnded, ranking };
   }
 
   private async findWinningPlay(
@@ -740,27 +631,6 @@ export class RoomService implements IRoomService {
       );
     }
     return winner;
-  }
-
-  private async claimJudgedRound(
-    round: Round,
-    winner: RoundPlayedCard
-  ): Promise<void> {
-    const claimed = await this.store.rounds.claimAdvance(
-      round.id,
-      'JUDGING',
-      'COMPLETE'
-    );
-    if (!claimed) {
-      throw new BadRequestError(
-        `A rodada ${round.roundNumber} já foi decidida.`
-      );
-    }
-    // roundWinnerId relates to round_played_cards.id (see roundsRelations).
-    await this.store.rounds.update(round.id, {
-      roundWinnerId: winner.id,
-      updatedAt: new Date()
-    });
   }
 
   // Deal a fresh Hand to EVERY Player at room start, including the first Judge —

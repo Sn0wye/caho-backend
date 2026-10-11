@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { judgeKey, parseDeadlineKey, playKey } from './deadlineKeys';
+import { graceKey, judgeKey, parseDeadlineKey, playKey } from './deadlineKeys';
 
 describe('CAHO deadline namespace', () => {
-  it('prefixes both deadline types', () => {
+  it('prefixes every deadline type', () => {
     expect(playKey('abc')).toBe('caho:round:abc:play');
     expect(judgeKey('abc')).toBe('caho:round:abc:judge');
+    expect(graceKey('abc')).toBe('caho:round:abc:grace');
   });
 
-  it.each(['play', 'judge'] as const)('decodes a prefixed %s expiry', kind => {
+  it.each(['play', 'judge', 'grace'] as const)('decodes a prefixed %s expiry', kind => {
     expect(parseDeadlineKey(`caho:round:abc:${kind}`)).toEqual({
       roundId: 'abc',
       kind

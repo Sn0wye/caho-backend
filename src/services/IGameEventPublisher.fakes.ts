@@ -2,7 +2,7 @@ import type { PlayerEvent, RoomEvent } from '@/contracts';
 import type { IGameEventPublisher } from './IGameEventPublisher';
 
 // Records every published event so orchestrator specs can assert the right events
-// went to the right channels, in order. Shared by RoundFlow and RoomOrchestrator
+// went to the right channels, in order. Shared by RoundLifecycle and RoomOrchestrator
 // tests (AGENTS.md: named fakes, one publisher fake, no duplication).
 export class FakeGameEventPublisher implements IGameEventPublisher {
   public readonly published: Array<{

@@ -1,13 +1,10 @@
 import { db } from '@/db';
 import type { IRoundRepository } from './IRoundRepository';
-import type { IRoundTimerRepository } from '@/services/round/IRoundTimerRepository';
 import type { Round, RoundStatus } from '@/schemas';
 import { rounds } from '@/db/schema';
 import { and, eq, inArray, lte, or } from 'drizzle-orm';
 
-export class RoundRepository
-  implements IRoundRepository, IRoundTimerRepository
-{
+export class RoundRepository implements IRoundRepository {
   private db: typeof db;
 
   constructor() {

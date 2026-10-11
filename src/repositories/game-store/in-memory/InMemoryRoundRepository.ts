@@ -1,5 +1,5 @@
 import type { Round, RoundStatus } from '@/schemas';
-import type { IGameRoundRepository } from '../IGameStore';
+import type { IRoundRepository } from '@/repositories/round/IRoundRepository';
 import { type InMemoryGameTables, definedOnly } from './InMemoryGameTables';
 
 const ACTIVE_PHASES: RoundStatus[] = ['PLAYING', 'JUDGING'];
@@ -11,7 +11,7 @@ function deadlineHasExpired(deadline: Date | null, now: Date): boolean {
 // rounds table, with the same conditional claim and expired-active sweep as
 // RoundRepository. This is the only in-memory claim: the per-service copies it
 // replaced had started to drift (ADR-0003, issue #24).
-export class InMemoryRoundRepository implements IGameRoundRepository {
+export class InMemoryRoundRepository implements IRoundRepository {
   constructor(private readonly tables: InMemoryGameTables) {}
 
   /**
