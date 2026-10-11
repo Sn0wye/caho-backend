@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { env } from '@/env';
 import { logger } from '@/lib/logger';
-import { observeRedis } from '@/observability/dependency-events';
+import { observeRedis } from '@/lib/redis-events';
 import type Redis from 'ioredis';
 
 declare global {

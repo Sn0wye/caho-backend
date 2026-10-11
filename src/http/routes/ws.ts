@@ -1,8 +1,8 @@
 import type { App } from '@/app';
+import { completeSocketUpgrade } from '@/http/request-observability';
+import { SocketSession } from '@/http/socket-session';
+import { SocketSessions } from '@/http/socket-session';
 import { logger } from '@/lib/logger';
-import { completeSocketUpgrade } from '@/observability/http-observability';
-import { SocketSession } from '@/observability/socket-session';
-import { SocketSessions } from '@/observability/socket-sessions';
 import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';

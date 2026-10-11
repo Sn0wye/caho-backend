@@ -2,17 +2,16 @@ import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
 import { describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
-import { SocketSession } from './socket-session';
+import { SocketSession, SocketSessions } from './socket-session';
 import {
   FakeGameSocket,
   FakeSocketPresence,
   FakeSocketSubscription
 } from './socket-session.fakes';
-import { SocketSessions } from './socket-sessions';
 
 function buildSocketHarness() {
   const output = new FakeConsoleOutput();
-  const { logger } = buildLogger(undefined, true, output);
+  const { logger } = buildLogger({ consoleOutput: output });
   const socket = new FakeGameSocket();
   const subscription = new FakeSocketSubscription();
   const presence = new FakeSocketPresence();

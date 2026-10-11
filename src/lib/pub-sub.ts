@@ -1,10 +1,10 @@
 import type { PlayerEvent, RoomEvent } from '@/contracts';
 import { CAHO_REDIS_PREFIX } from '@/db/redis-prefix';
-import { traceOperation } from '@/observability/operations';
+import { traceOperation } from '@/lib/tracing';
 import { ROOT_CONTEXT, context, propagation } from '@opentelemetry/api';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
-import { openRedisSubscription } from './redis-subscription';
+import { openRedisSubscription } from './redis-events';
 
 type Event = RoomEvent | PlayerEvent;
 type TracedEvent = Event & { __cahoTrace?: Record<string, string> };

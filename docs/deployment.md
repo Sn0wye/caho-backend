@@ -13,10 +13,14 @@ rtk docker run --rm --env-file .env.production -p 8080:8080 caho-api:local
 
 The image runs migrations and seeds the base card pack before starting the API.
 A migration failure stops startup. Coordinate migration runners if using multiple
-replicas. Rolling back the image does not reverse database migrations.
+replicas. Schema changes must stay compatible with the previous API during a
+rolling replacement. Rolling back the image does not reverse database migrations.
 
 Redis needs `notify-keyspace-events Ex` for Round timers. The API checks this
-setting at startup and attempts to enable it when permitted.
+setting at startup and attempts to enable it when permitted. A Redis ACL can
+restrict keys to `~caho:*` and channels to `&caho:*`, but must also allow
+`&__keyevent@<db>__:expired` for the configured database. Set
+`notify-keyspace-events` on the server to avoid granting `CONFIG SET`.
 
 Check `/ping` for API liveness and `/readyz` for database/Redis readiness.
 
@@ -50,7 +54,9 @@ OTEL_SDK_DISABLED=false
 ```
 
 Keep 100% root tracing initially. Incoming W3C context retains its sampling
-decision. `OTEL_SDK_DISABLED=true` disables traces while keeping logs.
+decision, so a client sending an unsampled `traceparent` suppresses that
+request's trace. Strip `traceparent` at the edge if that matters.
+`OTEL_SDK_DISABLED=true` disables traces while keeping logs.
 Omit `SEQ_URL` and any explicit traces endpoint to disable telemetry export.
 
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` optionally overrides the full traces URL.

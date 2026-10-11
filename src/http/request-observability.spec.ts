@@ -2,6 +2,7 @@ import { ForbiddenError, InternalServerError } from '@/errors';
 import { fastifyErrorHandler } from '@/http/error-handler';
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
+import { TelemetryTestHarness } from '@/lib/telemetry.fakes';
 import { fastifySensible } from '@fastify/sensible';
 import { fastifyWebsocket } from '@fastify/websocket';
 import { SpanStatusCode } from '@opentelemetry/api';
@@ -13,8 +14,7 @@ import { ZodError } from 'zod';
 import {
   completeSocketUpgrade,
   installHttpObservability
-} from './http-observability';
-import { TelemetryTestHarness } from './telemetry.fakes';
+} from './request-observability';
 
 let harness: TelemetryTestHarness;
 beforeEach(() => {
@@ -27,7 +27,7 @@ afterEach(async () => {
 
 function buildHttpHarness() {
   const output = new FakeConsoleOutput();
-  const { logger } = buildLogger(undefined, true, output);
+  const { logger } = buildLogger({ consoleOutput: output });
   const app = fastify({
     logger: logger as FastifyBaseLogger,
     disableRequestLogging: true,

@@ -1,6 +1,12 @@
 import { env } from './env';
-import { logSettings, seqStream, telemetryConsoleLogger } from './lib/logger';
-import { buildTelemetry } from './observability/telemetry';
+import {
+  logSettings,
+  logger,
+  seqStream,
+  telemetryConsoleLogger
+} from './lib/logger';
+import { buildTelemetry } from './lib/telemetry';
+import { runServer } from './runtime';
 
 const telemetry = buildTelemetry(
   {
@@ -22,10 +28,25 @@ const telemetry = buildTelemetry(
 
 async function bootServer(): Promise<void> {
   telemetry?.start();
-  // Dynamic import keeps pg/ioredis unloaded until instrumentation is registered.
-  const { runServer } = await import('./runtime');
-  await runServer(async () => {
-    await telemetry?.shutdown();
+  // Dynamic imports keep pg/ioredis unloaded until instrumentation is registered.
+  const { app } = await import('./app');
+  const { postgresPool } = await import('./db');
+  const { redis } = await import('./db/redis');
+  await runServer({
+    listen: () => app.listen({ host: '0.0.0.0', port: env.PORT }),
+    resources: {
+      closeApp: () => app.close(),
+      closeDatabase: () => postgresPool.end(),
+      closeRedis: () => redis.quit(),
+      closeTelemetry: async () => {
+        await telemetry?.shutdown();
+      },
+      flushLogs: async () => {
+        await seqStream?.flush();
+      }
+    },
+    log: logger,
+    process
   });
 }
 

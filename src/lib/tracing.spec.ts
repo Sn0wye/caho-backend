@@ -1,8 +1,7 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { traceBackground, traceOperation } from './operations';
 import { TelemetryTestHarness } from './telemetry.fakes';
-import { activeTraceFields } from './trace-context';
+import { activeTraceFields, traceBackground, traceOperation } from './tracing';
 
 let harness: TelemetryTestHarness;
 beforeEach(() => {

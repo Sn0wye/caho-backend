@@ -1,5 +1,7 @@
 import type { App } from '@/app';
+import { FailureLogWindow } from '@/lib/failure-log-window';
 import {
+  type Context,
   ROOT_CONTEXT,
   type Span,
   SpanKind,
@@ -9,7 +11,6 @@ import {
   trace
 } from '@opentelemetry/api';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { FailureLogWindow } from './failure-log-window';
 
 const requestSpans = new WeakMap<FastifyRequest, Span>();
 const requestStartTimes = new WeakMap<FastifyRequest, number>();
@@ -86,11 +87,18 @@ function healthSummaryDue(
   return null;
 }
 
-function endRequestSpan(request: FastifyRequest, statusCode: number): void {
+// A null status means the client aborted before any response was sent.
+function endRequestSpan(
+  request: FastifyRequest,
+  statusCode: number | null
+): void {
   const span = requestSpans.get(request);
-  span?.setAttribute('http.response.status_code', statusCode);
-  if (statusCode >= 500) span?.setStatus({ code: SpanStatusCode.ERROR });
-  span?.end();
+  if (!span) return;
+  if (statusCode !== null)
+    span.setAttribute('http.response.status_code', statusCode);
+  if (statusCode === null || statusCode >= 500)
+    span.setStatus({ code: SpanStatusCode.ERROR });
+  span.end();
   requestSpans.delete(request);
   requestStartTimes.delete(request);
 }
@@ -106,9 +114,7 @@ function completeRequest(
   endRequestSpan(request, reply.statusCode);
 }
 
-function beginRequest(
-  request: FastifyRequest
-): import('@opentelemetry/api').Context {
+function beginRequest(request: FastifyRequest): Context {
   const route = requestRoute(request);
   const parent = propagation.extract(ROOT_CONTEXT, request.headers);
   const span = trace.getTracer('caho.http').startSpan(
@@ -157,10 +163,7 @@ function installRequestCompletion(
       { event: 'http.request_aborted', route: requestRoute(request) },
       'HTTP request aborted'
     );
-    requestSpans.get(request)?.setStatus({ code: SpanStatusCode.ERROR });
-    requestSpans.get(request)?.end();
-    requestSpans.delete(request);
-    requestStartTimes.delete(request);
+    endRequestSpan(request, null);
   });
 }
 

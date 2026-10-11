@@ -1,6 +1,6 @@
 import { env } from '@/env';
-import { FailureLogWindow } from '@/observability/failure-log-window';
-import { activeTraceFields } from '@/observability/trace-context';
+import { FailureLogWindow } from '@/lib/failure-log-window';
+import { activeTraceFields } from '@/lib/tracing';
 import pino from 'pino';
 import { createStream } from 'pino-seq';
 import { version } from '../../package.json';
@@ -76,14 +76,12 @@ function loggerOptions(settings: LogSettings): pino.LoggerOptions {
   };
 }
 
-function defaultLogSettings(production: boolean): LogSettings {
-  return {
-    level: 'info',
-    serviceName: 'caho-backend',
-    serviceVersion: version,
-    environment: production ? 'production' : 'development'
-  };
-}
+const DEFAULT_LOG_SETTINGS: LogSettings = {
+  level: 'info',
+  serviceName: 'caho-backend',
+  serviceVersion: version,
+  environment: 'development'
+};
 
 function optionalSeqStream(
   seqUrl: string | undefined,
@@ -124,14 +122,20 @@ function loggerStreams(
   return streams;
 }
 
-/** Create JSON console logging and optional Seq shipping. Example: buildLogger(undefined, true). */
-export function buildLogger(
-  seqUrl?: string,
-  production = false,
-  consoleOutput: NodeJS.WritableStream = process.stdout,
-  seqApiKey?: string,
-  settings: LogSettings = defaultLogSettings(production)
-): { logger: pino.Logger; seqStream: SeqStream | null } {
+export interface LoggerTargets {
+  consoleOutput?: NodeJS.WritableStream;
+  seqUrl?: string;
+  seqApiKey?: string;
+  settings?: LogSettings;
+}
+
+/** Create JSON console logging and optional Seq shipping. Example: buildLogger({ consoleOutput: output }). */
+export function buildLogger({
+  consoleOutput = process.stdout,
+  seqUrl,
+  seqApiKey,
+  settings = DEFAULT_LOG_SETTINGS
+}: LoggerTargets = {}): { logger: pino.Logger; seqStream: SeqStream | null } {
   const options = loggerOptions(settings);
   const seqStream = optionalSeqStream(
     seqUrl,
@@ -149,13 +153,11 @@ export const logSettings: LogSettings = {
   environment: env.NODE_ENV
 };
 
-export const { logger, seqStream } = buildLogger(
-  env.SEQ_URL,
-  env.NODE_ENV === 'production',
-  process.stdout,
-  env.SEQ_API_KEY,
-  logSettings
-);
+export const { logger, seqStream } = buildLogger({
+  seqUrl: env.SEQ_URL,
+  seqApiKey: env.SEQ_API_KEY,
+  settings: logSettings
+});
 // Export failures must bypass Seq to avoid a recursive transport failure loop.
 export const telemetryConsoleLogger = pino(
   loggerOptions(logSettings),

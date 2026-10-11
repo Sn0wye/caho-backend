@@ -2,15 +2,15 @@ import { EventEmitter } from 'node:events';
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
 import { describe, expect, it } from 'vitest';
-import { observeRedis } from './dependency-events';
 import { FailureLogWindow } from './failure-log-window';
+import { observeRedis } from './redis-events';
 
 class FakeRedisConnection extends EventEmitter {}
 
 describe('Redis connection observability', () => {
   it('records failure, retry, recovery and closure without unhandled errors', () => {
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const connection = new FakeRedisConnection();
     observeRedis(connection, logger, 'round-expiry');
     connection.emit('error', new Error('connection refused'));
@@ -31,7 +31,7 @@ describe('Redis connection observability', () => {
 
   it('caps repeats per connection, reports counts, and resets on recovery', () => {
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const connection = new FakeRedisConnection();
     let timestamp = 0;
     observeRedis(
@@ -59,7 +59,7 @@ describe('Redis connection observability', () => {
 
   it('keeps healthy per-socket connection churn below info level', () => {
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const connection = new FakeRedisConnection();
     observeRedis(connection, logger, 'pubsub');
     connection.emit('ready');

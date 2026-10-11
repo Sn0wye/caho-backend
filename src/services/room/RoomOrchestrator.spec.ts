@@ -100,7 +100,7 @@ function build(state: Partial<RoomOrchestratorState>): Harness {
   const clock = new FakeJudgeClock();
   const publisher = new FakeGameEventPublisher();
   const output = new FakeConsoleOutput();
-  const { logger } = buildLogger(undefined, true, output);
+  const { logger } = buildLogger({ consoleOutput: output });
   return {
     output,
     orchestrator: new RoomOrchestrator(rooms, clock, publisher, logger),

@@ -1,7 +1,7 @@
 import type { PlayerEvent, RoomEvent } from '@/contracts';
+import { traceBackground } from '@/lib/tracing';
 import type { FastifyBaseLogger } from 'fastify';
 import { WebSocket } from 'ws';
-import { traceBackground } from './operations';
 
 type SubscribeToEvents = (
   channel: string,
@@ -125,5 +125,21 @@ export class SocketSession {
       { event: 'ws.disconnected', channel: this.channel, closeCode },
       'WebSocket disconnected'
     );
+  }
+}
+
+/** Retain live socket sessions until async cleanup completes. Example: sessions.open(session). */
+export class SocketSessions {
+  private readonly sessions = new Set<SocketSession>();
+
+  public open(session: SocketSession): void {
+    this.sessions.add(session);
+    void session.completed.then(() => this.sessions.delete(session));
+    session.start();
+  }
+
+  /** Drain socket work before the DB pool ends. Example: await sessions.close(). */
+  public async close(): Promise<void> {
+    await Promise.all([...this.sessions].map(session => session.shutdown()));
   }
 }

@@ -7,7 +7,7 @@ import {
   UnauthorizedError,
   UnprocessableEntityError
 } from '@/errors';
-import { recordRequestFailure } from '@/observability/http-observability';
+import { recordRequestFailure } from '@/http/request-observability';
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 

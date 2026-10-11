@@ -71,7 +71,9 @@ export class AuthService {
   public async signIn(username: string, password: string) {
     const user = await this.userRepository.findByUsername(username);
 
-    if (!user) {
+    // OAuth-only Users store an empty hash; argon2 throws on it instead of
+    // returning false, which surfaced as a 500 rather than a rejected sign-in.
+    if (!user?.password) {
       throw new UnauthorizedError('Usuário ou senha inválidos');
     }
 

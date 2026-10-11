@@ -1,4 +1,4 @@
-import { FailureLogWindow } from '@/observability/failure-log-window';
+import { FailureLogWindow } from '@/lib/failure-log-window';
 import { sql } from 'drizzle-orm';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';

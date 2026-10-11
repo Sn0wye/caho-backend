@@ -26,7 +26,7 @@ afterEach(() => {
 
 function buildAuthHarness(authenticated = true) {
   const output = new FakeConsoleOutput();
-  const { logger } = buildLogger(undefined, true, output);
+  const { logger } = buildLogger({ consoleOutput: output });
   const app = fastify({
     logger: logger as FastifyBaseLogger,
     disableRequestLogging: true

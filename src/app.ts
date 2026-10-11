@@ -22,6 +22,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { db } from './db';
 import { fastifyErrorHandler } from './http/error-handler';
+import { installHttpObservability } from './http/request-observability';
 import { authRoutes } from './http/routes/auth';
 import { checkRoutes } from './http/routes/checks';
 import { pingRoute } from './http/routes/ping';
@@ -29,8 +30,7 @@ import { roomRoutes } from './http/routes/room';
 import { wsRoutes } from './http/routes/ws';
 import { logger } from './lib/logger';
 import { Pubsub } from './lib/pub-sub';
-import { installHttpObservability } from './observability/http-observability';
-import { traceBackground } from './observability/operations';
+import { traceBackground } from './lib/tracing';
 import { authPlugin } from './plugins/auth';
 import { RoundTimekeeperFactory } from './services/round/RoundTimekeeperFactory';
 import { ensureExpiryNotifications } from './services/round/ensureExpiryNotifications';

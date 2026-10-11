@@ -1,6 +1,6 @@
+import { installHttpObservability } from '@/http/request-observability';
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
-import { installHttpObservability } from '@/observability/http-observability';
 import { type FastifyBaseLogger, fastify } from 'fastify';
 import {
   type ZodTypeProvider,
@@ -34,7 +34,7 @@ describe('readiness outage logging', () => {
   it('caps dependency and HTTP repeats while reporting recovery and correct readiness', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const postgres = new FakeReadinessPostgres();
     const redis = new FakeReadinessRedis();
     const app = fastify({

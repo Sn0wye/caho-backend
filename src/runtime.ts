@@ -1,60 +1,91 @@
-import { app } from './app';
-import { postgresPool } from './db';
-import { redis } from './db/redis';
-import { env } from './env';
-import { logger, seqStream } from './lib/logger';
-import {
-  type ServerResources,
-  closeServerResources
-} from './observability/server-lifecycle';
+import type { Logger } from 'pino';
 
-/** Run the app after OTEL starts, and drain on signals. Example: await runServer(() => sdk.shutdown()). */
-export async function runServer(
-  closeTelemetry: () => Promise<void>
-): Promise<void> {
-  const resources = serverResources(closeTelemetry);
-  installShutdownSignals(resources);
+export interface ServerResources {
+  closeApp(): Promise<void>;
+  closeDatabase(): Promise<void>;
+  closeRedis(): Promise<unknown>;
+  closeTelemetry(): Promise<void>;
+  flushLogs(): Promise<unknown>;
+}
+
+/** The slice of `process` the server lifecycle touches; tests pass a fake. */
+export interface ServerProcess {
+  exitCode?: number | string | null;
+  exit(code: number): void;
+  once(signal: 'SIGTERM' | 'SIGINT', listener: () => void): unknown;
+}
+
+export interface ServerRuntime {
+  listen(): Promise<string>;
+  resources: ServerResources;
+  log: Logger;
+  process: ServerProcess;
+  shutdownDeadlineMs?: number;
+}
+
+const SHUTDOWN_STEPS = [
+  'closeApp',
+  'closeDatabase',
+  'closeRedis',
+  'closeTelemetry',
+  'flushLogs'
+] as const;
+
+/** Listen, and drain on SIGTERM/SIGINT. Example: await runServer({ listen, resources, log, process }). */
+export async function runServer(runtime: ServerRuntime): Promise<void> {
+  installShutdownSignals(runtime);
   try {
-    const url = await app.listen({ host: '0.0.0.0', port: env.PORT });
-    logger.info({ event: 'server.started', url }, 'Server listening');
+    const url = await runtime.listen();
+    runtime.log.info({ event: 'server.started', url }, 'Server listening');
   } catch (err) {
-    logger.fatal(
+    runtime.log.fatal(
       { event: 'server.startup_failed', err },
       'Server startup failed'
     );
-    await closeServerResources(resources, logger);
-    process.exitCode = 1;
+    await closeServerResources(runtime.resources, runtime.log);
+    runtime.process.exitCode = 1;
   }
 }
 
-function serverResources(closeTelemetry: () => Promise<void>): ServerResources {
-  return {
-    closeApp: () => app.close(),
-    closeDatabase: () => postgresPool.end(),
-    closeRedis: () => redis.quit(),
-    closeTelemetry,
-    flushLogs: async () => {
-      await seqStream?.flush();
+/** Drain app, dependencies and telemetry before exit. Example: await closeServerResources(resources, logger). */
+export async function closeServerResources(
+  resources: ServerResources,
+  log: Logger
+): Promise<boolean> {
+  let successful = true;
+  for (const step of SHUTDOWN_STEPS) {
+    try {
+      await resources[step]();
+    } catch (err) {
+      successful = false;
+      log.error(
+        { event: 'server.shutdown_failed', step, err },
+        'Server resource shutdown failed'
+      );
     }
-  };
+  }
+  return successful;
 }
 
-function installShutdownSignals(resources: ServerResources): void {
+function installShutdownSignals(runtime: ServerRuntime): void {
   let stopping = false;
   const stop = async (signal: string): Promise<void> => {
     if (stopping) return;
     stopping = true;
-    const deadline = setTimeout(() => process.exit(1), 10000);
+    // A hung dependency must not keep the container alive past its stop grace.
+    const deadline = setTimeout(
+      () => runtime.process.exit(1),
+      runtime.shutdownDeadlineMs ?? 10000
+    );
     deadline.unref();
-    logger.info({ event: 'server.stopping', signal }, 'Server stopping');
-    const successful = await closeServerResources(resources, logger);
+    runtime.log.info({ event: 'server.stopping', signal }, 'Server stopping');
+    const successful = await closeServerResources(
+      runtime.resources,
+      runtime.log
+    );
     clearTimeout(deadline);
-    process.exit(successful ? 0 : 1);
+    runtime.process.exit(successful ? 0 : 1);
   };
-  process.once('SIGTERM', () => {
-    void stop('SIGTERM');
-  });
-  process.once('SIGINT', () => {
-    void stop('SIGINT');
-  });
+  runtime.process.once('SIGTERM', () => void stop('SIGTERM'));
+  runtime.process.once('SIGINT', () => void stop('SIGINT'));
 }

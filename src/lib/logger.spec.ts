@@ -1,5 +1,5 @@
-import { traceOperation } from '@/observability/operations';
-import { TelemetryTestHarness } from '@/observability/telemetry.fakes';
+import { TelemetryTestHarness } from '@/lib/telemetry.fakes';
+import { traceOperation } from '@/lib/tracing';
 import type { PinoSeqStreamConfig } from 'pino-seq';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildLogger } from './logger';
@@ -21,12 +21,11 @@ vi.mock('pino-seq', async () => {
 describe('production logger', () => {
   it('ships logs with the configured API key without logging that secret', () => {
     const consoleOutput = new FakeConsoleOutput();
-    const { logger, seqStream } = buildLogger(
-      'http://seq:5341',
-      true,
+    const { logger, seqStream } = buildLogger({
+      seqUrl: 'http://seq:5341',
       consoleOutput,
-      'caho-ingest-test-key'
-    );
+      seqApiKey: 'caho-ingest-test-key'
+    });
     expect(seqStream).toBeInstanceOf(FakeSeqOutput);
     if (!(seqStream instanceof FakeSeqOutput))
       throw new Error('Expected FakeSeqOutput');
@@ -41,7 +40,7 @@ describe('production logger', () => {
 
   it('writes structured JSON directly to the supplied console stream', () => {
     const consoleOutput = new FakeConsoleOutput();
-    const { logger, seqStream } = buildLogger(undefined, true, consoleOutput);
+    const { logger, seqStream } = buildLogger({ consoleOutput: consoleOutput });
     logger.info({ roomCode: 'ABC123' }, 'round started');
 
     expect(seqStream).toBeNull();
@@ -55,7 +54,7 @@ describe('production logger', () => {
 
   it('keeps error details without pretty-printing overhead', () => {
     const consoleOutput = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, consoleOutput);
+    const { logger } = buildLogger({ consoleOutput: consoleOutput });
     logger.error({ err: new Error('Redis unavailable') }, 'timer failed');
 
     expect(JSON.parse(consoleOutput.lines[0])).toMatchObject({
@@ -69,7 +68,10 @@ describe('production logger', () => {
 describe('logging policy', () => {
   it('redacts secrets and private game payloads from both log outputs', () => {
     const output = new FakeConsoleOutput();
-    const { logger, seqStream } = buildLogger('http://seq:80', true, output);
+    const { logger, seqStream } = buildLogger({
+      seqUrl: 'http://seq:80',
+      consoleOutput: output
+    });
     logger.info(
       {
         password: 'private-password',
@@ -94,7 +96,7 @@ describe('logging policy', () => {
 
   it('keeps error causes and stacks but drops driver-specific secret fields', () => {
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const err = Object.assign(
       new Error('query failed', { cause: new Error('connection lost') }),
       { detail: 'private-query-value', query: 'private-sql' }
@@ -107,18 +109,16 @@ describe('logging policy', () => {
 
   it('sends configured debug events to both streams with service identity', () => {
     const output = new FakeConsoleOutput();
-    const { logger, seqStream } = buildLogger(
-      'http://seq:80',
-      false,
-      output,
-      undefined,
-      {
+    const { logger, seqStream } = buildLogger({
+      seqUrl: 'http://seq:80',
+      consoleOutput: output,
+      settings: {
         level: 'debug',
         serviceName: 'game-api',
         serviceVersion: '1.2.3',
         environment: 'test'
       }
-    );
+    });
     logger.debug({ event: 'pubsub.published' }, 'debug event');
     expect(JSON.parse(output.lines[0])).toMatchObject({
       service: 'game-api',
@@ -133,7 +133,7 @@ describe('logging policy', () => {
     const harness = new TelemetryTestHarness();
     harness.start();
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     try {
       logger.info('outside trace');
       await traceOperation('round.test', {}, async () => {
@@ -149,7 +149,10 @@ describe('logging policy', () => {
 
   it('reports Seq failures to console without sending them back to Seq', () => {
     const output = new FakeConsoleOutput();
-    const { seqStream } = buildLogger('http://seq:80', true, output);
+    const { seqStream } = buildLogger({
+      seqUrl: 'http://seq:80',
+      consoleOutput: output
+    });
     const fake = seqStream as unknown as FakeSeqOutput;
     fake.config.onError?.(new Error('private-api-key'));
     expect(JSON.parse(output.lines[0]).event).toBe('seq.export_failed');
@@ -160,7 +163,10 @@ describe('logging policy', () => {
   it('bounds console-only export failures and reports suppressed repeat counts', () => {
     vi.useFakeTimers();
     const output = new FakeConsoleOutput();
-    const { seqStream } = buildLogger('http://seq:80', true, output);
+    const { seqStream } = buildLogger({
+      seqUrl: 'http://seq:80',
+      consoleOutput: output
+    });
     const fake = seqStream as unknown as FakeSeqOutput;
     for (let index = 0; index < 100; index++)
       fake.config.onError?.(new Error('private-api-key'));

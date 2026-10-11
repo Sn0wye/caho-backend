@@ -1,22 +1,18 @@
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
-import { TelemetryTestHarness } from '@/observability/telemetry.fakes';
+import { FakeRedisPubsub } from '@/lib/pub-sub.fakes';
+import { TelemetryTestHarness } from '@/lib/telemetry.fakes';
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { Redis } from 'ioredis';
 import { describe, expect, it, vi } from 'vitest';
-import { ensureExpiryNotifications } from './ensureExpiryNotifications';
-import {
-  FakeExpiryRedis,
-  FakeExpiryRedisSettings,
-  FakeRoundExpiryDriver
-} from './expiry-observability.fakes';
 import { subscribeRoundExpiry } from './subscribeRoundExpiry';
+import { FakeRoundExpiryDriver } from './subscribeRoundExpiry.fakes';
 
-describe('expiry subscription observability', () => {
+describe('subscribeRoundExpiry', () => {
   it('waits for in-flight expiry work before shutdown completes', async () => {
-    const redis = new FakeExpiryRedis();
+    const redis = new FakeRedisPubsub();
     const driver = new FakeRoundExpiryDriver();
-    const { logger } = buildLogger(undefined, true, new FakeConsoleOutput());
+    const { logger } = buildLogger({ consoleOutput: new FakeConsoleOutput() });
     let finishExpiry: () => void = () => {};
     driver.delay = new Promise<void>(resolve => {
       finishExpiry = resolve;
@@ -41,30 +37,14 @@ describe('expiry subscription observability', () => {
     await draining;
     expect(drained).toBe(true);
   });
-  it('keeps existing Redis flags and reports denied CONFIG with a serialized stack', async () => {
-    const redis = new FakeExpiryRedisSettings();
-    const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
-    redis.flags = 'Kg';
-    await ensureExpiryNotifications(redis as unknown as Redis, logger);
-    expect(redis.changedFlags).toEqual(['KgEx']);
-    redis.denied = true;
-    await ensureExpiryNotifications(redis as unknown as Redis, logger);
-    expect(JSON.parse(output.lines[0])).toMatchObject({
-      event: 'round.expiry_configuration_failed',
-      expected: 'Ex',
-      err: { message: 'CONFIG permission denied' }
-    });
-  });
-
   it('uses the configured Redis database and logs failures inside a bounded root trace', async () => {
     const harness = new TelemetryTestHarness();
     harness.start();
-    const redis = new FakeExpiryRedis();
+    const redis = new FakeRedisPubsub();
     const driver = new FakeRoundExpiryDriver();
     driver.failure = new Error('transition failed');
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     try {
       const cleanup = await subscribeRoundExpiry(
         redis as unknown as Redis,

@@ -1,5 +1,5 @@
-import { openRedisSubscription } from '@/lib/redis-subscription';
-import { traceBackground } from '@/observability/operations';
+import { openRedisSubscription } from '@/lib/redis-events';
+import { traceBackground } from '@/lib/tracing';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import type { RoundTimekeeper } from './RoundTimekeeper';

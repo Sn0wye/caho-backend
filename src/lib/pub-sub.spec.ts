@@ -1,6 +1,6 @@
 import type { RoomEvent } from '@/contracts';
-import { traceOperation } from '@/observability/operations';
-import { TelemetryTestHarness } from '@/observability/telemetry.fakes';
+import { TelemetryTestHarness } from '@/lib/telemetry.fakes';
+import { traceOperation } from '@/lib/tracing';
 import type { Redis } from 'ioredis';
 import { describe, expect, it, vi } from 'vitest';
 import { buildLogger } from './logger';
@@ -72,7 +72,7 @@ describe('Pub/Sub observability', () => {
   it('logs malformed messages without their contents and catches callback failures', async () => {
     const redis = new FakeRedisPubsub();
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const pubsub = new Pubsub(redis as unknown as Redis, logger);
     const unsubscribe = await pubsub.subscribe('ABC123', () => {
       throw new Error('send failed');
@@ -95,7 +95,7 @@ describe('Pub/Sub observability', () => {
     redis.publishError = new Error('publish failed');
     redis.subscribeError = new Error('subscribe failed');
     const output = new FakeConsoleOutput();
-    const { logger } = buildLogger(undefined, true, output);
+    const { logger } = buildLogger({ consoleOutput: output });
     const pubsub = new Pubsub(redis as unknown as Redis, logger);
     await expect(pubsub.publish('ABC123', event)).rejects.toThrow(
       'publish failed'

@@ -68,7 +68,7 @@ function buildTimekeeper(args: {
   };
 
   const output = new FakeConsoleOutput();
-  const { logger } = buildLogger(undefined, true, output);
+  const { logger } = buildLogger({ consoleOutput: output });
   const timekeeper = new RoundTimekeeper(
     fakes.store,
     fakes.rounds,
