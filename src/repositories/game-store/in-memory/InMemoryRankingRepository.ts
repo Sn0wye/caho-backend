@@ -6,12 +6,6 @@ import type { Ranking } from '@/schemas';
 export class InMemoryRankingRepository implements IRankingRepository {
   constructor(private readonly players: IRoomPlayersRepository) {}
 
-  /**
-   * The Room's Players, highest score first.
-   *
-   * @example
-   * const ranking = await store.ranking.getRankingByRoomCode('ABC123');
-   */
   async getRankingByRoomCode(roomCode: string): Promise<Ranking> {
     const players = await this.players.getRoomPlayersByCode(roomCode);
     return players

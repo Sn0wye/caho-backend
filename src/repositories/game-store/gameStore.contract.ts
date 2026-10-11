@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IGameStore } from './IGameStore';
 import {
-  CONTRACT_POOL,
   type GameStoreHarness,
   ROOM_CODE,
   makePlayer,
@@ -38,7 +37,7 @@ export function describeGameStoreContract(harness: GameStoreHarness): void {
 
 function describeJudgeDerivation(harness: GameStoreHarness): void {
   it('derives isJudge from the Room Judge and follows a rotation', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       {
@@ -73,7 +72,7 @@ function describeJudgeDerivation(harness: GameStoreHarness): void {
 
 function describePlayedCards(harness: GameStoreHarness): void {
   async function openWithRound(): Promise<IGameStore> {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       {

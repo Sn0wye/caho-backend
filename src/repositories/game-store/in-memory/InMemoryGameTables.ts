@@ -65,16 +65,6 @@ export class InMemoryGameTables {
 }
 
 /**
- * Deep copy of a row, so stored state and returned values never alias.
- *
- * @example
- * return cloneRow(tables.rooms.get(code));
- */
-export function cloneRow<T>(row: T): T {
-  return structuredClone(row);
-}
-
-/**
  * Drop `undefined` values, like drizzle's `.set()` does, so a partial update
  * never blanks a column.
  *

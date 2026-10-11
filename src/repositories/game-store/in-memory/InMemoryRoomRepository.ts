@@ -1,40 +1,24 @@
 import type { IRoomRepository } from '@/repositories/room';
 import type { PublicRoomWithPlayerCountAndHost, Room } from '@/schemas';
-import {
-  type InMemoryGameTables,
-  cloneRow,
-  definedOnly
-} from './InMemoryGameTables';
+import { type InMemoryGameTables, definedOnly } from './InMemoryGameTables';
 
 // rooms table, keyed by Code like RoomRepository.
 export class InMemoryRoomRepository implements IRoomRepository {
   constructor(private readonly tables: InMemoryGameTables) {}
 
-  /**
-   * The Room with this Code, or undefined.
-   *
-   * @example
-   * const room = await store.rooms.getRoomByCode('ABC123');
-   */
   async getRoomByCode(roomCode: string): Promise<Room | undefined> {
     const room = this.tables.rooms.get(roomCode);
-    return room ? cloneRow(room) : undefined;
+    return room ? structuredClone(room) : undefined;
   }
 
-  /**
-   * Insert a Room; a Code already in use is a unique violation.
-   *
-   * @example
-   * await store.rooms.create(makeRoom({ code: 'ABC123' }));
-   */
   async create(room: Room): Promise<Room> {
     if (this.tables.rooms.has(room.code)) {
       throw new Error(
         `Unique violation on rooms.code: "${room.code}" already exists (expected a fresh Code)`
       );
     }
-    this.tables.rooms.set(room.code, cloneRow(room));
-    return cloneRow(room);
+    this.tables.rooms.set(room.code, structuredClone(room));
+    return structuredClone(room);
   }
 
   /**
@@ -68,8 +52,8 @@ export class InMemoryRoomRepository implements IRoomRepository {
       return undefined as unknown as Room;
     }
     const updated = { ...room, ...definedOnly(roomPatch) };
-    this.tables.rooms.set(roomCode, cloneRow(updated));
-    return cloneRow(updated);
+    this.tables.rooms.set(roomCode, structuredClone(updated));
+    return structuredClone(updated);
   }
 
   private toPublicRoom(

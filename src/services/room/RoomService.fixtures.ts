@@ -7,7 +7,7 @@ import {
   makeWhiteCard,
   seedGame
 } from '@/repositories/game-store/gameStore.fixtures';
-import type { Player, WhiteCard } from '@/schemas';
+import type { Player, RoomPlayer, WhiteCard } from '@/schemas';
 import { BlackCardDeck } from './BlackCardDeck';
 import { RoomService } from './RoomService';
 import { WhiteCardDealer } from './WhiteCardDealer';
@@ -15,6 +15,8 @@ import { WhiteCardDealer } from './WhiteCardDealer';
 // Shared builders for the RoomService specs: the real RoomService, deck and
 // dealer over one InMemoryGameStore, seeded through the store's interface.
 // See issue #24 (the per-service fakes this replaced didn't behave like Postgres).
+
+import { ROOM_CODE } from '@/repositories/game-store/gameStore.fixtures';
 
 export {
   ROOM_CODE,
@@ -81,4 +83,40 @@ export async function buildService(
     new BlackCardDeck(store)
   );
   return { service, store };
+}
+
+/**
+ * What a room.* payload carries for makePlayer({ id }): no Hand, no isJudge
+ * (ADR-0005). Written out so it can't mirror toRoomPlayer.
+ *
+ * @example
+ * makeRoomPlayer('player-a', { isReady: true });
+ */
+export function makeRoomPlayer(
+  id: string,
+  overrides: Partial<RoomPlayer> = {}
+): RoomPlayer {
+  return {
+    id,
+    username: id,
+    avatarUrl: null,
+    isHost: false,
+    isReady: false,
+    isActive: true,
+    score: 0,
+    ...overrides
+  };
+}
+
+/**
+ * A Player of the fixture Room as stored, or undefined once they Leave.
+ *
+ * @example
+ * expect((await findPlayer(store, 'player-a'))?.score).toBe(1);
+ */
+export async function findPlayer(
+  store: InMemoryGameStore,
+  id: string
+): Promise<Player | undefined> {
+  return await store.players.getPlayerFromRoom(ROOM_CODE, id);
 }

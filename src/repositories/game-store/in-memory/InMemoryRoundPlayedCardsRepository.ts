@@ -1,11 +1,7 @@
 import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
 import type { Round, RoundPlayedCard, WhiteCard } from '@/schemas';
-import {
-  type InMemoryGameTables,
-  type PlayedCardsRow,
-  cloneRow
-} from './InMemoryGameTables';
+import type { InMemoryGameTables, PlayedCardsRow } from './InMemoryGameTables';
 
 // round_played_cards + its ordered white-card pivot. Writes enforce the same
 // keys as Postgres (one answer per Round and Player, real Round/User/White
@@ -42,12 +38,6 @@ export class InMemoryRoundPlayedCardsRepository
     return { id: row.id, roundId: row.roundId, createdAt: now, updatedAt: now };
   }
 
-  /**
-   * Every Played Cards entry of a Room's Round; [] when the Round is unknown.
-   *
-   * @example
-   * const playedCards = await store.playedCards.findByRoomCodeAndRoundNumber('ABC123', 1);
-   */
   async findByRoomCodeAndRoundNumber(
     roomCode: string,
     roundNumber: number
@@ -102,7 +92,7 @@ export class InMemoryRoundPlayedCardsRepository
 
   private toPlayedCards(row: PlayedCardsRow): RoundPlayedCard {
     const profile = this.tables.users.get(row.playerId);
-    return cloneRow({
+    return structuredClone({
       id: row.id,
       roundId: row.roundId,
       player: profile ?? {

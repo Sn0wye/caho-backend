@@ -2,7 +2,6 @@ import { BlackCardDeck } from '@/services/room/BlackCardDeck';
 import { WhiteCardDealer } from '@/services/room/WhiteCardDealer';
 import { expect, it } from 'vitest';
 import {
-  CONTRACT_POOL,
   type GameStoreHarness,
   ROOM_CODE,
   makePlayer,
@@ -25,7 +24,7 @@ import {
 // biome-ignore lint/suspicious/noExportsInTest: part of the shared contract suite.
 export function describeCardDraws(harness: GameStoreHarness): void {
   it('drawing a Black Card makes it the Room current Black Card', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       { room: makeRoom({ currentBlackCardId: null, pickedBlackCards: [] }) },
@@ -43,7 +42,7 @@ export function describeCardDraws(harness: GameStoreHarness): void {
   });
 
   it('dealing White Cards records them on the Room so they do not repeat', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(store, { room: makeRoom() }, harness.users);
     const dealer = new WhiteCardDealer(store);
 
@@ -67,7 +66,7 @@ export function describeCardDraws(harness: GameStoreHarness): void {
 // biome-ignore lint/suspicious/noExportsInTest: part of the shared contract suite.
 export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   it('keys Room updates by Code: any other key changes nothing', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       { room: makeRoom({ id: 'room-1', round: 1 }) },
@@ -83,9 +82,9 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   });
 
   it('joins a Player with no score, an empty Hand and as active', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(store, { room: makeRoom() }, harness.users);
-    await harness.users.registerUser({
+    await harness.users?.registerUser({
       id: 'player-a',
       username: 'Ana',
       avatarUrl: null
@@ -121,7 +120,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   });
 
   it('writes several Players at once, columns only', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     const ana = makePlayer({ id: 'player-a', username: 'Ana' });
     const bo = makePlayer({ id: 'player-b', username: 'Bo' });
     await seedGame(
@@ -149,7 +148,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   });
 
   it('ignores identity and isJudge in a Player update', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       {
@@ -176,7 +175,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   });
 
   it('scores, resets ready flags and ranks Players by score', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       {
@@ -206,7 +205,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   });
 
   it('removes a Player who Leaves but keeps their Played Cards readable', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     await seedGame(
       store,
       {
@@ -248,7 +247,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
   });
 
   it('lists public LOBBY Rooms with their head count and Host', async () => {
-    const store = await harness.open(CONTRACT_POOL);
+    const store = await harness.open();
     const lobby = {
       status: 'LOBBY' as const,
       hostId: 'player-a',

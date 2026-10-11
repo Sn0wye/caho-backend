@@ -9,6 +9,9 @@ import { InMemoryRoomRepository } from './in-memory/InMemoryRoomRepository';
 import { InMemoryRoundPlayedCardsRepository } from './in-memory/InMemoryRoundPlayedCardsRepository';
 import { InMemoryRoundRepository } from './in-memory/InMemoryRoundRepository';
 
+// The card catalogue a store draws from (the white_cards/black_cards tables).
+export type CardPool = { whiteCards: WhiteCard[]; blackCards: BlackCard[] };
+
 /**
  * The one in-memory game store, held to the same contract as Postgres
  * (gameStore.contract). Replaces the per-service store fakes so game-loop
@@ -27,7 +30,7 @@ export class InMemoryGameStore implements IGameStore {
   readonly playedCards: InMemoryRoundPlayedCardsRepository;
   readonly cards: InMemoryCardRepository;
 
-  constructor(pool: { whiteCards: WhiteCard[]; blackCards: BlackCard[] }) {
+  constructor(pool: CardPool) {
     const tables = new InMemoryGameTables(pool.whiteCards, pool.blackCards);
     this.rooms = new InMemoryRoomRepository(tables);
     this.players = new InMemoryRoomPlayersRepository(tables);

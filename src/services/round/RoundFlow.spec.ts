@@ -6,14 +6,15 @@ import {
   makeBlackCard,
   makeWhiteCard
 } from '@/repositories/game-store/gameStore.fixtures';
-import type { Player, RoomPlayer } from '@/schemas';
 import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
 import {
   ROOM_CODE,
   buildService,
+  findPlayer,
   makePlayedCards,
   makePlayer,
   makeRoom,
+  makeRoomPlayer,
   makeRound
 } from '@/services/room/RoomService.fixtures';
 import { describe, expect, it } from 'vitest';
@@ -48,7 +49,7 @@ function tableSeed(overrides: Partial<GameSeed> = {}): GameSeed {
   return {
     room: makeRoom({ judgeId: JUDGE_ID, pickedBlackCards: ['black-1'] }),
     players: [JUDGE_ID, 'player-a', 'player-b'].map(id =>
-      makePlayer({ id, username: id, cardIds: [`card-${id}`] })
+      makePlayer({ id, cardIds: [`card-${id}`] })
     ),
     rounds: [makeRound({ status: 'PLAYING' })],
     ...overrides
@@ -71,24 +72,6 @@ async function buildTable(seed: GameSeed = tableSeed()): Promise<Table> {
   return { flow, store, timers, publisher, timekeeper };
 }
 
-// What a room.* Player payload carries for a fresh makePlayer: no Hand, no
-// isJudge (ADR-0005). Written out so it can't mirror toRoomPlayer.
-function roomPlayer(
-  id: string,
-  overrides: Partial<RoomPlayer> = {}
-): RoomPlayer {
-  return {
-    id,
-    username: id,
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isActive: true,
-    score: 0,
-    ...overrides
-  };
-}
-
 type TimeToJudge = Extract<RoomEvent, { event: 'room.time-to-judge' }>;
 
 function timeToJudgeEvents(publisher: FakeGameEventPublisher): TimeToJudge[] {
@@ -98,12 +81,6 @@ function timeToJudgeEvents(publisher: FakeGameEventPublisher): TimeToJudge[] {
       (event: RoomEvent | PlayerEvent): event is TimeToJudge =>
         event.event === 'room.time-to-judge'
     );
-}
-
-async function playerIn(store: InMemoryGameStore, id: string): Promise<Player> {
-  const player = await store.players.getPlayerFromRoom(ROOM_CODE, id);
-  if (!player) throw new Error(`No Player "${id}" in Room ${ROOM_CODE}`);
-  return player;
 }
 
 describe('RoundFlow.playCards', () => {
@@ -117,7 +94,7 @@ describe('RoundFlow.playCards', () => {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: roomPlayer('player-a', { isReady: true })
+          payload: makeRoomPlayer('player-a', { isReady: true })
         }
       },
       {
@@ -128,7 +105,7 @@ describe('RoundFlow.playCards', () => {
         }
       }
     ]);
-    expect((await playerIn(store, 'player-a')).cardIds).toEqual(['pool-1']);
+    expect((await findPlayer(store, 'player-a'))?.cardIds).toEqual(['pool-1']);
     expect((await store.rounds.findById('round-1'))?.status).toBe('PLAYING');
   });
 
@@ -237,7 +214,7 @@ describe('RoundFlow.judgePick', () => {
       .map(player => player.id);
     expect(judges).toEqual([next?.judgeId]);
     expect(players.every(player => !player.isReady)).toBe(true);
-    expect((await playerIn(store, 'player-b')).score).toBe(1);
+    expect((await findPlayer(store, 'player-b'))?.score).toBe(1);
   });
 
   it('ends the game instead of opening a Round when the win-condition is met', async () => {
@@ -291,11 +268,11 @@ describe('RoundFlow.playerReady', () => {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: roomPlayer('player-a', { isReady: true })
+          payload: makeRoomPlayer('player-a', { isReady: true })
         }
       }
     ]);
-    expect((await playerIn(store, 'player-a')).isReady).toBe(true);
+    expect((await findPlayer(store, 'player-a'))?.isReady).toBe(true);
   });
 
   it('rejects the toggle mid-game, where ready means "played this Round"', async () => {

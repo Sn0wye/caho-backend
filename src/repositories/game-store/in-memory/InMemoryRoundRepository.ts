@@ -1,10 +1,6 @@
 import type { Round, RoundStatus } from '@/schemas';
 import type { IGameRoundRepository } from '../IGameStore';
-import {
-  type InMemoryGameTables,
-  cloneRow,
-  definedOnly
-} from './InMemoryGameTables';
+import { type InMemoryGameTables, definedOnly } from './InMemoryGameTables';
 
 const ACTIVE_PHASES: RoundStatus[] = ['PLAYING', 'JUDGING'];
 
@@ -27,49 +23,31 @@ export class InMemoryRoundRepository implements IGameRoundRepository {
   async create(round: Round): Promise<Round> {
     this.tables.requireRoom(round.roomCode, `rounds(${round.id})`);
     this.assertUnique(round);
-    this.tables.rounds.set(round.id, cloneRow(round));
-    return cloneRow(round);
+    this.tables.rounds.set(round.id, structuredClone(round));
+    return structuredClone(round);
   }
 
-  /**
-   * A Room's Round by number, or null.
-   *
-   * @example
-   * const current = await store.rounds.find('ABC123', room.round);
-   */
   async find(roomCode: string, number: number): Promise<Round | null> {
     const round = [...this.tables.rounds.values()].find(
       candidate =>
         candidate.roomCode === roomCode && candidate.roundNumber === number
     );
-    return round ? cloneRow(round) : null;
+    return round ? structuredClone(round) : null;
   }
 
-  /**
-   * A Round by id, or null.
-   *
-   * @example
-   * const round = await store.rounds.findById('round-1');
-   */
   async findById(id: string): Promise<Round | null> {
     const round = this.tables.rounds.get(id);
-    return round ? cloneRow(round) : null;
+    return round ? structuredClone(round) : null;
   }
 
-  /**
-   * Patch a Round by id; null when no Round matches.
-   *
-   * @example
-   * await store.rounds.update('round-1', { judgeDeadline: null });
-   */
   async update(id: string, roundPatch: Partial<Round>): Promise<Round | null> {
     const round = this.tables.rounds.get(id);
     if (!round) {
       return null;
     }
     const updated = { ...round, ...definedOnly(roundPatch) };
-    this.tables.rounds.set(id, cloneRow(updated));
-    return cloneRow(updated);
+    this.tables.rounds.set(id, structuredClone(updated));
+    return structuredClone(updated);
   }
 
   /**
@@ -106,7 +84,7 @@ export class InMemoryRoundRepository implements IGameRoundRepository {
           deadlineHasExpired(round.playDeadline, now) ||
           deadlineHasExpired(round.judgeDeadline, now)
       )
-      .map(cloneRow);
+      .map(round => structuredClone(round));
   }
 
   private assertUnique(round: Round): void {

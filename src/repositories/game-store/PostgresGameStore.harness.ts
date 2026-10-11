@@ -2,11 +2,12 @@ import type { db } from '@/db';
 import { blackCards, cardPacks, users, whiteCards } from '@/db/schema';
 import type { PublicUser } from '@/schemas';
 import { sql } from 'drizzle-orm';
+import type { CardPool } from './InMemoryGameStore';
 import { PostgresGameStoreFactory } from './PostgresGameStore';
-import type {
-  CardPool,
-  GameStoreHarness,
-  UserRegistry
+import {
+  CONTRACT_POOL,
+  type GameStoreHarness,
+  type UserRegistry
 } from './gameStore.fixtures';
 
 // Opt-in (RUN_DB_MIGRATIONS=true) contract harness over the docker-compose.test
@@ -91,9 +92,9 @@ export function createPostgresGameStoreHarness(
   return {
     name: 'Postgres',
     users: new PostgresUserRegistry(database),
-    async open(pool) {
+    async open() {
       await resetGameTables(database);
-      await insertCardPool(database, pool);
+      await insertCardPool(database, CONTRACT_POOL);
       return PostgresGameStoreFactory();
     }
   };

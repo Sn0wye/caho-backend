@@ -6,7 +6,6 @@ import {
   type GameSeed,
   makeBlackCard
 } from '@/repositories/game-store/gameStore.fixtures';
-import type { Player, RoomPlayer } from '@/schemas';
 import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
 import { describe, expect, it } from 'vitest';
 import { RoomOrchestrator } from './RoomOrchestrator';
@@ -14,8 +13,10 @@ import { FakeJudgeClock } from './RoomOrchestrator.fakes';
 import {
   ROOM_CODE,
   buildService,
+  findPlayer,
   makePlayer,
   makeRoom,
+  makeRoomPlayer,
   makeRound
 } from './RoomService.fixtures';
 
@@ -35,19 +36,14 @@ type Harness = {
   output: FakeConsoleOutput;
 };
 
-// A Player whose username matches its id, so payloads read plainly.
-function player(id: string, overrides: Partial<Player> = {}): Player {
-  return makePlayer({ id, username: id, ...overrides });
-}
-
 // Host, Judge and one more Player, mid-game in Round 1.
 function gameSeed(overrides: Partial<GameSeed> = {}): GameSeed {
   return {
     room: makeRoom({ hostId: HOST_ID, judgeId: JUDGE_ID }),
     players: [
-      player(HOST_ID, { isHost: true }),
-      player(JUDGE_ID),
-      player('player-a')
+      makePlayer({ id: HOST_ID, isHost: true }),
+      makePlayer({ id: JUDGE_ID }),
+      makePlayer({ id: 'player-a' })
     ],
     rounds: [makeRound()],
     ...overrides
@@ -77,31 +73,6 @@ async function build(seed: GameSeed = gameSeed()): Promise<Harness> {
   return { orchestrator, store, clock, publisher, output };
 }
 
-// What a room.* Player payload carries: no Hand, no isJudge (ADR-0005).
-// Written out so it can't mirror toRoomPlayer.
-function roomPlayer(
-  id: string,
-  overrides: Partial<RoomPlayer> = {}
-): RoomPlayer {
-  return {
-    id,
-    username: id,
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isActive: true,
-    score: 0,
-    ...overrides
-  };
-}
-
-async function playerIn(
-  store: InMemoryGameStore,
-  id: string
-): Promise<Player | undefined> {
-  return await store.players.getPlayerFromRoom(ROOM_CODE, id);
-}
-
 describe('RoomOrchestrator.joinRoom', () => {
   it('adds the Player and announces the join', async () => {
     const { orchestrator, store, publisher } = await build(lobbySeed());
@@ -109,15 +80,18 @@ describe('RoomOrchestrator.joinRoom', () => {
     const room = await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: null,
-      player: player('newcomer')
+      player: makePlayer({ id: 'newcomer' })
     });
 
     expect(room.code).toBe(ROOM_CODE);
-    expect(await playerIn(store, 'newcomer')).toBeDefined();
+    expect(await findPlayer(store, 'newcomer'))?.toBeDefined();
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
-        event: { event: 'room.player-joined', payload: roomPlayer('newcomer') }
+        event: {
+          event: 'room.player-joined',
+          payload: makeRoomPlayer('newcomer')
+        }
       }
     ]);
   });
@@ -128,10 +102,10 @@ describe('RoomOrchestrator.joinRoom', () => {
     await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: null,
-      player: player('newcomer')
+      player: makePlayer({ id: 'newcomer' })
     });
 
-    const hand = (await playerIn(store, 'newcomer'))?.cardIds ?? [];
+    const hand = (await findPlayer(store, 'newcomer'))?.cardIds ?? [];
     expect(hand).toHaveLength(10);
     const dealt = publisher.published.at(-1);
     expect(dealt?.channel).toBe('newcomer');
@@ -161,7 +135,7 @@ describe('RoomOrchestrator.joinRoom', () => {
       orchestrator.joinRoom({
         roomCode: ROOM_CODE,
         password: 'wrong',
-        player: player('newcomer')
+        player: makePlayer({ id: 'newcomer' })
       })
     ).rejects.toThrow(BadRequestError);
     expect(publisher.published).toEqual([]);
@@ -179,7 +153,7 @@ describe('RoomOrchestrator.startRoom', () => {
         password: 'secret'
       }),
       players: [HOST_ID, 'player-a', 'player-b'].map(id =>
-        player(id, { isHost: id === HOST_ID, isReady: true })
+        makePlayer({ id: id, isHost: id === HOST_ID, isReady: true })
       )
     });
   }
@@ -230,7 +204,7 @@ describe('RoomOrchestrator.leaveRoom', () => {
 
     await orchestrator.leaveRoom(ROOM_CODE, 'player-a');
 
-    expect(await playerIn(store, 'player-a')).toBeUndefined();
+    expect(await findPlayer(store, 'player-a'))?.toBeUndefined();
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
@@ -255,7 +229,7 @@ describe('RoomOrchestrator.leaveRoom', () => {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: roomPlayer(room?.hostId ?? '', { isHost: true })
+          payload: makeRoomPlayer(room?.hostId ?? '', { isHost: true })
         }
       }
     ]);
@@ -287,8 +261,8 @@ describe('RoomOrchestrator.markPresence', () => {
   it('broadcasts the re-activated Player on reconnect with no departure fallout', async () => {
     const seed = gameSeed();
     seed.players = [
-      player(HOST_ID, { isHost: true }),
-      player(JUDGE_ID, { isActive: false })
+      makePlayer({ id: HOST_ID, isHost: true }),
+      makePlayer({ id: JUDGE_ID, isActive: false })
     ];
     const { orchestrator, store, clock, publisher } = await build(seed);
 
@@ -297,10 +271,13 @@ describe('RoomOrchestrator.markPresence', () => {
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
-        event: { event: 'room.player-update', payload: roomPlayer(JUDGE_ID) }
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer(JUDGE_ID)
+        }
       }
     ]);
-    expect((await playerIn(store, JUDGE_ID))?.isActive).toBe(true);
+    expect((await findPlayer(store, JUDGE_ID))?.isActive).toBe(true);
     expect(clock.gracedRoundIds).toHaveLength(0);
   });
 
@@ -327,7 +304,7 @@ describe('RoomOrchestrator.markPresence', () => {
 
     expect(clock.gracedRoundIds).toEqual(['round-1']);
     expect(clock.expiredRoundIds).toHaveLength(0);
-    expect((await playerIn(store, JUDGE_ID))?.isActive).toBe(false);
+    expect((await findPlayer(store, JUDGE_ID))?.isActive).toBe(false);
   });
 
   // Regression: a Host refresh in LOBBY closed the socket and ended the Room.
@@ -341,7 +318,7 @@ describe('RoomOrchestrator.markPresence', () => {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: roomPlayer(HOST_ID, { isHost: true, isActive: false })
+          payload: makeRoomPlayer(HOST_ID, { isHost: true, isActive: false })
         }
       }
     ]);
@@ -358,8 +335,8 @@ describe('RoomOrchestrator.markPresence', () => {
 
     const room = await store.rooms.getRoomByCode(ROOM_CODE);
     expect(room?.hostId).not.toBe(HOST_ID);
-    expect((await playerIn(store, room?.hostId ?? ''))?.isHost).toBe(true);
-    expect((await playerIn(store, HOST_ID))?.isHost).toBe(false);
+    expect((await findPlayer(store, room?.hostId ?? ''))?.isHost).toBe(true);
+    expect((await findPlayer(store, HOST_ID))?.isHost).toBe(false);
   });
 });
 
@@ -367,8 +344,8 @@ describe('RoomOrchestrator.endRoom', () => {
   it('ends the game and broadcasts the final Ranking for the Host', async () => {
     const seed = gameSeed();
     seed.players = [
-      player(HOST_ID, { isHost: true, score: 1 }),
-      player(JUDGE_ID, { score: 3 })
+      makePlayer({ id: HOST_ID, isHost: true, score: 1 }),
+      makePlayer({ id: JUDGE_ID, score: 3 })
     ];
     const { orchestrator, store, publisher } = await build(seed);
 
@@ -429,7 +406,7 @@ describe('Room lifecycle logging', () => {
     await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: 'private-password',
-      player: player('newcomer', { cardIds: ['private-card'] })
+      player: makePlayer({ id: 'newcomer', cardIds: ['private-card'] })
     });
 
     expect(JSON.parse(output.lines[0])).toMatchObject({

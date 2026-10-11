@@ -15,18 +15,12 @@ import {
   CALLER_HAND,
   CALLER_ID,
   EXPECTED_ROOM_PLAYERS,
-  buildRoomReadsCardService,
   roomReadsFixture
 } from './room-reads.fakes';
 
-// Resolved at call time, not in the factory: the fakes import RoomService, which
-// imports CardServiceFactory, so an eager import here deadlocks module loading.
+// Read at call time: vi.mock is hoisted above the fixture import.
 vi.mock('@/services/room/RoomServiceFactory', () => ({
   RoomServiceFactory: () => roomReadsFixture.service
-}));
-vi.mock('@/services/CardServiceFactory', () => ({
-  CardServiceFactory: (roomCode: string) =>
-    buildRoomReadsCardService(roomCode)
 }));
 
 const CALLER: SessionUser = {

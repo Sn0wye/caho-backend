@@ -8,12 +8,6 @@ import type { InMemoryGameTables } from './InMemoryGameTables';
 export class InMemoryCardRepository implements ICardRepository {
   constructor(private readonly tables: InMemoryGameTables) {}
 
-  /**
-   * The first `count` White Cards not in `excludeIds`.
-   *
-   * @example
-   * const hand = await store.cards.drawWhiteCards({ count: 10, excludeIds: room.pickedWhiteCards });
-   */
   async drawWhiteCards(input: { count: number; excludeIds: string[] }): Promise<
     WhiteCard[]
   > {
@@ -23,12 +17,6 @@ export class InMemoryCardRepository implements ICardRepository {
       .map(card => ({ ...card }));
   }
 
-  /**
-   * The first Black Card not in `excludeIds`, or undefined.
-   *
-   * @example
-   * const card = await store.cards.drawBlackCard({ excludeIds: room.pickedBlackCards });
-   */
   async drawBlackCard(input: { excludeIds: string[] }): Promise<
     BlackCard | undefined
   > {
@@ -38,23 +26,11 @@ export class InMemoryCardRepository implements ICardRepository {
     return card ? { ...card } : undefined;
   }
 
-  /**
-   * A White Card by id, or undefined.
-   *
-   * @example
-   * const card = await store.cards.findWhiteCardById('w1');
-   */
   async findWhiteCardById(id: string): Promise<WhiteCard | undefined> {
     const card = this.tables.whiteCards.find(card => card.id === id);
     return card ? { ...card } : undefined;
   }
 
-  /**
-   * A Black Card by id, or undefined.
-   *
-   * @example
-   * const card = await store.cards.findBlackCardById('black-1');
-   */
   async findBlackCardById(id: string): Promise<BlackCard | undefined> {
     const card = this.tables.blackCards.find(card => card.id === id);
     return card ? { ...card } : undefined;

@@ -2,6 +2,7 @@ import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
 import type { BlackCard } from '@/repositories/cards';
 import type { Player, PublicUser, Room, Round, WhiteCard } from '@/schemas';
 import type { IGameStore } from './IGameStore';
+import type { CardPool } from './InMemoryGameStore';
 
 // Builders + seeders shared by the game-store contract and the game-loop specs.
 // Seeders write only through the IGameStore interface, so a spec never reaches
@@ -9,10 +10,10 @@ import type { IGameStore } from './IGameStore';
 // a stored isJudge flag). See issue #24.
 
 export const ROOM_CODE = 'ABC123';
-export const CARD_PACK_ID = 'fake-pack';
+const CARD_PACK_ID = 'fake-pack';
 
-// Postgres needs a users row behind every hostId/judgeId/playerId (FKs); the
-// in-memory adapter keeps the profile a Player joined with instead.
+// Postgres needs a users row behind every hostId/judgeId/playerId (FKs). The
+// in-memory store keeps the profile a Player joined with, so it needs none.
 export type UserRegistry = {
   // Create a placeholder User if missing; never overwrite a real profile.
   ensureUser(id: string): Promise<void>;
@@ -20,40 +21,27 @@ export type UserRegistry = {
   registerUser(user: PublicUser): Promise<void>;
 };
 
-/**
- * User registry for the in-memory store, which has no users table: it keeps
- * the profile a Player joins with, so there is nothing to register up front.
- *
- * @example
- * await seedGame(store, seed, new InMemoryUserRegistry());
- */
-export class InMemoryUserRegistry implements UserRegistry {
-  async ensureUser(_id: string): Promise<void> {}
-
-  async registerUser(_user: PublicUser): Promise<void> {}
-}
-
-export type CardPool = { whiteCards: WhiteCard[]; blackCards: BlackCard[] };
-
 // One adapter under gameStore.contract.
 export type GameStoreHarness = {
   name: string;
-  // Backs the hostId/judgeId/playerId references seeds make.
-  users: UserRegistry;
-  // A store with no game data, holding only `pool` as its card catalogue.
-  open(pool: CardPool): Promise<IGameStore>;
+  // Backs the hostId/judgeId/playerId references seeds make; Postgres only.
+  users?: UserRegistry;
+  // A store with no game data, holding only CONTRACT_POOL as its cards.
+  open(): Promise<IGameStore>;
 };
 
 /**
- * A Player (active, no score, empty Hand) with overrides.
+ * A Player (active, no score, empty Hand) with overrides. The username
+ * defaults to the id so payloads read plainly.
  *
  * @example
  * makePlayer({ id: 'player-a', cardIds: ['w1'] });
  */
 export function makePlayer(overrides: Partial<Player> = {}): Player {
+  const id = overrides.id ?? 'player-1';
   return {
-    id: 'player-1',
-    username: 'player-1',
+    id,
+    username: id,
     avatarUrl: null,
     isHost: false,
     isReady: false,
@@ -142,39 +130,29 @@ export function makeBlackCard(overrides: Partial<BlackCard> = {}): BlackCard {
   };
 }
 
-/**
- * Create a Room, registering the Users its host/Judge columns point at.
- *
- * @example
- * await seedRoom(store, makeRoom({ judgeId: 'player-a' }));
- */
-export async function seedRoom(
+// Create a Room, registering the Users its host/Judge columns point at.
+async function seedRoom(
   store: IGameStore,
   room: Room,
-  users: UserRegistry = new InMemoryUserRegistry()
-): Promise<Room> {
+  users?: UserRegistry
+): Promise<void> {
   const referenced = [room.hostId, room.judgeId, room.prevJudgeId];
   for (const id of referenced) {
-    if (id) await users.ensureUser(id);
+    if (id) await users?.ensureUser(id);
   }
-  return await store.rooms.create(room);
+  await store.rooms.create(room);
 }
 
-/**
- * Join a Player, then apply the per-Room state a join can't set (score, Hand,
- * presence). `isJudge` is ignored on purpose: it comes from the Room's judgeId.
- *
- * @example
- * await seedPlayer(store, ROOM_CODE, makePlayer({ id: 'player-a', score: 2 }));
- */
-export async function seedPlayer(
+// Join a Player, then apply the per-Room state a join can't set (score, Hand,
+// presence). `isJudge` is ignored on purpose: it comes from the Room's judgeId.
+async function seedPlayer(
   store: IGameStore,
   roomCode: string,
   player: Player,
-  users: UserRegistry = new InMemoryUserRegistry()
+  users?: UserRegistry
 ): Promise<void> {
   const { id, username, avatarUrl } = player;
-  await users.registerUser({ id, username, avatarUrl });
+  await users?.registerUser({ id, username, avatarUrl });
   await store.players.addPlayerToRoom({ roomCode, player });
   await store.players.updatePlayerInRoom(roomCode, player.id, {
     score: player.score,
@@ -183,19 +161,6 @@ export async function seedPlayer(
     isActive: player.isActive,
     cardIds: player.cardIds
   });
-}
-
-/**
- * Record a Player's Played Cards for a Round through the store.
- *
- * @example
- * await seedPlayedCards(store, { roundId: 'round-1', playerId: 'player-a', whiteCardIds: ['w1'] });
- */
-export async function seedPlayedCards(
-  store: IGameStore,
-  answer: CreateRoundPlayedCardDTO
-): Promise<void> {
-  await store.playedCards.create(answer);
 }
 
 export type GameSeed = {
@@ -214,7 +179,7 @@ export type GameSeed = {
 export async function seedGame(
   store: IGameStore,
   seed: GameSeed,
-  users: UserRegistry = new InMemoryUserRegistry()
+  users?: UserRegistry
 ): Promise<void> {
   await seedRoom(store, seed.room, users);
   for (const player of seed.players ?? []) {
@@ -224,7 +189,7 @@ export async function seedGame(
     await store.rounds.create(round);
   }
   for (const answer of seed.playedCards ?? []) {
-    await seedPlayedCards(store, answer);
+    await store.playedCards.create(answer);
   }
 }
 
@@ -247,7 +212,7 @@ export async function openWithRounds(
   harness: GameStoreHarness,
   rounds: Round[]
 ): Promise<IGameStore> {
-  const store = await harness.open(CONTRACT_POOL);
+  const store = await harness.open();
   await seedGame(store, { room: makeRoom(), rounds }, harness.users);
   return store;
 }

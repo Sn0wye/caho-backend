@@ -3,7 +3,7 @@ import { afterAll, describe } from 'vitest';
 import { InMemoryGameStore } from './InMemoryGameStore';
 import { createPostgresGameStoreHarness } from './PostgresGameStore.harness';
 import { describeGameStoreContract } from './gameStore.contract';
-import { InMemoryUserRegistry } from './gameStore.fixtures';
+import { CONTRACT_POOL } from './gameStore.fixtures';
 
 // One contract, two adapters (issue #24). The in-memory run is always on; the
 // Postgres run needs the docker-compose.test database and is opt-in through the
@@ -13,9 +13,8 @@ import { InMemoryUserRegistry } from './gameStore.fixtures';
 
 describeGameStoreContract({
   name: 'in-memory',
-  users: new InMemoryUserRegistry(),
-  async open(pool) {
-    return new InMemoryGameStore(pool);
+  async open() {
+    return new InMemoryGameStore(CONTRACT_POOL);
   }
 });
 
