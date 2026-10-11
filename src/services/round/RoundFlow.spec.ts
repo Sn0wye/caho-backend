@@ -1,226 +1,210 @@
-import type {
-  BlackCard,
-  Player,
-  Ranking,
-  Room,
-  RoomPlayer,
-  Round,
-  RoundPlayedCard,
-  RoundWithRelations,
-  WhiteCard
-} from '@/schemas';
-import type { JudgePickResult } from '@/services/room/IRoomService';
-import { describe, expect, it } from 'vitest';
+import type { PlayerEvent, RoomEvent } from '@/contracts';
+import { BadRequestError, ForbiddenError } from '@/errors';
+import type { InMemoryGameStore } from '@/repositories/game-store/InMemoryGameStore';
 import {
-  FakeGameEventPublisher,
-  FakeRoundClock,
-  FakeRoundFlowService,
-  type RoundFlowServiceState
-} from './RoundFlow.fakes';
+  type GameSeed,
+  makeBlackCard,
+  makeWhiteCard
+} from '@/repositories/game-store/gameStore.fixtures';
+import type { Player, RoomPlayer } from '@/schemas';
+import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
+import {
+  ROOM_CODE,
+  buildService,
+  makePlayedCards,
+  makePlayer,
+  makeRoom,
+  makeRound
+} from '@/services/room/RoomService.fixtures';
+import { describe, expect, it } from 'vitest';
 import { RoundFlow } from './RoundFlow';
+import { RoundTimekeeper } from './RoundTimekeeper';
+import { FakeRoundTimerStore } from './RoundTimekeeper.fakes';
+import { judgeKey, playKey } from './deadlineKeys';
 
-const ROOM_CODE = 'ABC123';
-const PLAYER_ID = 'player-a';
+// RoundFlow over the real game loop: RoomService and RoundTimekeeper on one
+// InMemoryGameStore, faking only Redis (the timer store) and the publisher.
+// Each case seeds the state that drives the flow instead of scripting what the
+// service returns, so the events are checked against what the rules actually
+// do. See issue #24.
 
-function makePlayer(overrides: Partial<Player> = {}): Player {
-  return {
-    id: PLAYER_ID,
-    username: 'player-a',
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isJudge: false,
-    isActive: true,
-    score: 0,
-    cardIds: [],
-    ...overrides
-  };
-}
-
-function makeRoom(overrides: Partial<Room> = {}): Room {
-  return {
-    id: 'room-1',
-    code: ROOM_CODE,
-    maxPlayers: 8,
-    maxPoints: 5,
-    status: 'IN_PROGRESS',
-    hostId: 'host',
-    password: null,
-    isPublic: true,
-    prevJudgeId: null,
-    judgeId: 'player-judge',
-    round: 2,
-    pickedWhiteCards: [],
-    pickedBlackCards: [],
-    currentBlackCardId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides
-  };
-}
-
-function makeRound(overrides: Partial<Round> = {}): Round {
-  return {
-    id: 'round-2',
-    roomCode: ROOM_CODE,
-    roundNumber: 2,
-    blackCardId: 'black-1',
-    judgeId: 'player-judge',
-    roundWinnerId: null,
-    status: 'PLAYING',
-    playDeadline: null,
-    judgeDeadline: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides
-  };
-}
-
-// Room-channel view of makePlayer: what a room.player-update actually carries
-// after the private Hand (cardIds) and derived isJudge are stripped. ADR-0005.
-function makeRoomPlayer(overrides: Partial<RoomPlayer> = {}): RoomPlayer {
-  return {
-    id: PLAYER_ID,
-    username: 'player-a',
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isActive: true,
-    score: 0,
-    ...overrides
-  };
-}
-
-const WHITE_CARD: WhiteCard = { id: 'wc-1', text: 'a white card', packId: 'p' };
-const BLACK_CARD: BlackCard = { text: 'a black card', pick: 1, packId: 'p' };
-
-function makePlayedCard(winnerId: string): RoundPlayedCard {
-  return {
-    id: 'played-1',
-    roundId: 'round-2',
-    player: {
-      id: winnerId,
-      username: winnerId,
-      avatarUrl: null
-    },
-    whiteCards: [WHITE_CARD],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
-}
-
-function makeNextRound(): RoundWithRelations & { blackCard: BlackCard } {
-  const round = makeRound({ id: 'round-3', roundNumber: 3 });
-  return {
-    ...round,
-    room: makeRoom({ round: 3 }),
-    judge: makePlayer({ id: 'player-judge', isJudge: true }),
-    roundWinner: null,
-    roundPlayedCards: [],
-    blackCard: BLACK_CARD
-  };
-}
-
-function makeJudgeResult(overrides: Partial<JudgePickResult> = {}): JudgePickResult {
-  return {
-    room: makeRoom(),
-    winner: makePlayedCard(PLAYER_ID),
-    winnerPlayer: makePlayer({ score: 1 }),
-    gameEnded: false,
-    ranking: null,
-    ...overrides
-  };
-}
-
-type Harness = {
-  flow: RoundFlow;
-  rooms: FakeRoundFlowService;
-  clock: FakeRoundClock;
-  publisher: FakeGameEventPublisher;
+const JUDGE_ID = 'player-judge';
+const TIMER_CONFIG = {
+  playWindowSeconds: 60,
+  judgeGraceSeconds: 30,
+  judgeWindowSeconds: 90
 };
 
-function buildFlow(
-  state: Partial<RoundFlowServiceState>,
-  didAdvance = true
-): Harness {
-  const rooms = new FakeRoundFlowService(state);
-  const clock = new FakeRoundClock(didAdvance);
+type Table = {
+  flow: RoundFlow;
+  store: InMemoryGameStore;
+  timers: FakeRoundTimerStore;
+  publisher: FakeGameEventPublisher;
+  timekeeper: RoundTimekeeper;
+};
+
+// Judge plus two Players, each holding one card named after them, in Round 1.
+function tableSeed(overrides: Partial<GameSeed> = {}): GameSeed {
+  return {
+    room: makeRoom({ judgeId: JUDGE_ID, pickedBlackCards: ['black-1'] }),
+    players: [JUDGE_ID, 'player-a', 'player-b'].map(id =>
+      makePlayer({ id, username: id, cardIds: [`card-${id}`] })
+    ),
+    rounds: [makeRound({ status: 'PLAYING' })],
+    ...overrides
+  };
+}
+
+async function buildTable(seed: GameSeed = tableSeed()): Promise<Table> {
+  const { service, store } = await buildService(seed);
+  const timers = new FakeRoundTimerStore();
   const publisher = new FakeGameEventPublisher();
-  return { flow: new RoundFlow(rooms, clock, publisher), rooms, clock, publisher };
+  const timekeeper = new RoundTimekeeper(
+    timers,
+    store.rounds,
+    store.playedCards,
+    service,
+    publisher,
+    TIMER_CONFIG
+  );
+  const flow = new RoundFlow(service, timekeeper, publisher);
+  return { flow, store, timers, publisher, timekeeper };
+}
+
+// What a room.* Player payload carries for a fresh makePlayer: no Hand, no
+// isJudge (ADR-0005). Written out so it can't mirror toRoomPlayer.
+function roomPlayer(
+  id: string,
+  overrides: Partial<RoomPlayer> = {}
+): RoomPlayer {
+  return {
+    id,
+    username: id,
+    avatarUrl: null,
+    isHost: false,
+    isReady: false,
+    isActive: true,
+    score: 0,
+    ...overrides
+  };
+}
+
+type TimeToJudge = Extract<RoomEvent, { event: 'room.time-to-judge' }>;
+
+function timeToJudgeEvents(publisher: FakeGameEventPublisher): TimeToJudge[] {
+  return publisher.published
+    .map(({ event }) => event)
+    .filter(
+      (event: RoomEvent | PlayerEvent): event is TimeToJudge =>
+        event.event === 'room.time-to-judge'
+    );
+}
+
+async function playerIn(store: InMemoryGameStore, id: string): Promise<Player> {
+  const player = await store.players.getPlayerFromRoom(ROOM_CODE, id);
+  if (!player) throw new Error(`No Player "${id}" in Room ${ROOM_CODE}`);
+  return player;
 }
 
 describe('RoundFlow.playCards', () => {
-  it('broadcasts the ready flag and the refilled Hand, and does not advance when others are still playing', async () => {
-    const { flow, clock, publisher, rooms } = buildFlow({
-      player: makePlayer(),
-      cardsDrawn: [WHITE_CARD],
-      allPlayed: false
-    });
+  it('broadcasts the ready flag and the refilled Hand, and does not advance while others play', async () => {
+    const { flow, store, publisher } = await buildTable();
 
-    await flow.playCards(ROOM_CODE, PLAYER_ID, ['c1']);
+    await flow.playCards(ROOM_CODE, 'player-a', ['card-player-a']);
 
-    expect(rooms.playCardsCalls).toEqual([
-      { roomCode: ROOM_CODE, playerId: PLAYER_ID, playedCardIds: ['c1'] }
-    ]);
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: makeRoomPlayer({ isReady: true })
+          payload: roomPlayer('player-a', { isReady: true })
         }
       },
       {
-        channel: PLAYER_ID,
-        event: { event: 'player.cards-drawn', payload: [WHITE_CARD] }
+        channel: 'player-a',
+        event: {
+          event: 'player.cards-drawn',
+          payload: [makeWhiteCard('pool-1')]
+        }
       }
     ]);
-    expect(clock.advanced).toHaveLength(0);
+    expect((await playerIn(store, 'player-a')).cardIds).toEqual(['pool-1']);
+    expect((await store.rounds.findById('round-1'))?.status).toBe('PLAYING');
   });
 
-  it('advances to judging once every active Player has played', async () => {
-    const round = makeRound();
-    const plays = [makePlayedCard(PLAYER_ID)];
-    const { flow, clock } = buildFlow({
-      player: makePlayer(),
-      cardsDrawn: [WHITE_CARD],
-      allPlayed: true,
-      activeRound: round,
-      plays
-    });
+  it('moves to judging when the last active Player plays, prompting the Judge once', async () => {
+    const { flow, store, timers, publisher, timekeeper } = await buildTable();
 
-    await flow.playCards(ROOM_CODE, PLAYER_ID, ['c1']);
+    await flow.playCards(ROOM_CODE, 'player-a', ['card-player-a']);
+    await flow.playCards(ROOM_CODE, 'player-b', ['card-player-b']);
+    // The play deadline firing late must not prompt the Judge a second time.
+    await timekeeper.onPlayExpired('round-1');
 
-    expect(clock.advanced).toEqual([{ round, plays }]);
+    const prompts = timeToJudgeEvents(publisher);
+    expect(prompts).toHaveLength(1);
+    const playerIds = prompts[0].payload.roundPlayedCards.map(
+      playedCards => playedCards.player.id
+    );
+    expect(playerIds.sort()).toEqual(['player-a', 'player-b']);
+    expect((await store.rounds.findById('round-1'))?.status).toBe('JUDGING');
+    expect(timers.armed.get(judgeKey('round-1'))).toBe(90);
   });
 
+  it('does not wait for an Inactive Player', async () => {
+    const seed = tableSeed();
+    seed.players?.push(makePlayer({ id: 'player-gone', isActive: false }));
+    const { flow, store, publisher } = await buildTable(seed);
+
+    await flow.playCards(ROOM_CODE, 'player-a', ['card-player-a']);
+    await flow.playCards(ROOM_CODE, 'player-b', ['card-player-b']);
+
+    expect(timeToJudgeEvents(publisher)).toHaveLength(1);
+    expect((await store.rounds.findById('round-1'))?.status).toBe('JUDGING');
+  });
+
+  it('rejects a play from the Judge and broadcasts nothing', async () => {
+    const { flow, publisher } = await buildTable();
+
+    await expect(
+      flow.playCards(ROOM_CODE, JUDGE_ID, [`card-${JUDGE_ID}`])
+    ).rejects.toThrow(ForbiddenError);
+    expect(publisher.published).toEqual([]);
+  });
 });
 
 describe('RoundFlow.judgePick', () => {
-  it('broadcasts one self-contained round end with the winner score, then starts and arms the next Round', async () => {
-    const winner = makePlayedCard(PLAYER_ID);
-    const winnerPlayer = makePlayer({ score: 1 });
-    const nextRound = makeNextRound();
-    const { flow, clock, publisher, rooms } = buildFlow({
-      judgeResult: makeJudgeResult({ winner, winnerPlayer }),
-      nextRound
+  function judgingSeed(maxPoints = 5): GameSeed {
+    return tableSeed({
+      room: makeRoom({
+        judgeId: JUDGE_ID,
+        pickedBlackCards: ['black-1'],
+        maxPoints
+      }),
+      rounds: [makeRound({ status: 'JUDGING' })],
+      playedCards: [makePlayedCards('player-a'), makePlayedCards('player-b')]
     });
+  }
 
-    await flow.judgePick(ROOM_CODE, 'player-judge', PLAYER_ID);
+  it('broadcasts one self-contained round end, then opens and arms the next Round', async () => {
+    const { flow, store, timers, publisher } = await buildTable(judgingSeed());
+    const answers = await store.playedCards.findByRoomCodeAndRoundNumber(
+      ROOM_CODE,
+      1
+    );
 
-    expect(rooms.judgeCalls).toEqual([
-      { roomCode: ROOM_CODE, judgePlayerId: 'player-judge', winnerPlayerId: PLAYER_ID }
-    ]);
-    expect(clock.armed).toEqual([nextRound.id]);
+    await flow.judgePick(ROOM_CODE, JUDGE_ID, 'player-b');
+
+    const next = await store.rounds.find(ROOM_CODE, 2);
+    expect(next?.judgeId).not.toBe(JUDGE_ID);
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
         event: {
           event: 'room.round-end',
           payload: {
-            roundNumber: 2,
-            winner,
-            winnerId: PLAYER_ID,
+            roundNumber: 1,
+            winner: answers.find(answer => answer.player.id === 'player-b'),
+            winnerId: 'player-b',
             newScore: 1,
             reason: 'picked'
           }
@@ -230,47 +214,96 @@ describe('RoundFlow.judgePick', () => {
         channel: ROOM_CODE,
         event: {
           event: 'room.round-start',
-          payload: { roundNumber: 3, judgeId: 'player-judge', blackCard: BLACK_CARD }
+          payload: {
+            roundNumber: 2,
+            judgeId: next?.judgeId,
+            blackCard: makeBlackCard({ id: 'black-2' })
+          }
         }
       }
     ]);
+    expect(timers.armed.get(playKey(next?.id ?? ''))).toBe(60);
   });
 
-  it('ends the game instead of starting a Round when the win-condition is met', async () => {
-    const ranking: Ranking = [
-      { id: PLAYER_ID, username: 'player-a', avatarUrl: null, score: 5 }
-    ];
-    const { flow, clock, publisher } = buildFlow({
-      judgeResult: makeJudgeResult({ gameEnded: true, ranking })
-    });
+  it('leaves exactly the new Judge flagged, everyone unready for Round 2', async () => {
+    const { flow, store } = await buildTable(judgingSeed());
 
-    await flow.judgePick(ROOM_CODE, 'player-judge', PLAYER_ID);
+    await flow.judgePick(ROOM_CODE, JUDGE_ID, 'player-b');
 
-    expect(clock.armed).toHaveLength(0);
+    const next = await store.rounds.find(ROOM_CODE, 2);
+    const players = await store.players.getRoomPlayersByCode(ROOM_CODE);
+    const judges = players
+      .filter(player => player.isJudge)
+      .map(player => player.id);
+    expect(judges).toEqual([next?.judgeId]);
+    expect(players.every(player => !player.isReady)).toBe(true);
+    expect((await playerIn(store, 'player-b')).score).toBe(1);
+  });
+
+  it('ends the game instead of opening a Round when the win-condition is met', async () => {
+    const { flow, store, timers, publisher } = await buildTable(judgingSeed(1));
+
+    await flow.judgePick(ROOM_CODE, JUDGE_ID, 'player-b');
+
     expect(publisher.published.at(-1)).toEqual({
       channel: ROOM_CODE,
-      event: { event: 'room.game-end', payload: ranking }
+      event: {
+        event: 'room.game-end',
+        payload: [
+          { id: 'player-b', username: 'player-b', avatarUrl: null, score: 1 },
+          { id: JUDGE_ID, username: JUDGE_ID, avatarUrl: null, score: 0 },
+          { id: 'player-a', username: 'player-a', avatarUrl: null, score: 0 }
+        ]
+      }
     });
+    expect((await store.rooms.getRoomByCode(ROOM_CODE))?.status).toBe(
+      'FINISHED'
+    );
+    expect(await store.rounds.find(ROOM_CODE, 2)).toBeNull();
+    expect(timers.armed.size).toBe(0);
+  });
+
+  it('rejects a second pick of the same Round and broadcasts nothing more', async () => {
+    const { flow, publisher } = await buildTable(judgingSeed());
+    await flow.judgePick(ROOM_CODE, JUDGE_ID, 'player-b');
+    const sent = publisher.published.length;
+
+    await expect(
+      flow.judgePick(ROOM_CODE, JUDGE_ID, 'player-a')
+    ).rejects.toThrow();
+    expect(publisher.published).toHaveLength(sent);
   });
 });
 
 describe('RoundFlow.playerReady', () => {
-  it('toggles the ready flag and broadcasts the Player update', async () => {
-    const { flow, publisher, rooms } = buildFlow({ player: makePlayer() });
+  it('toggles the ready flag in the LOBBY and broadcasts the Player update', async () => {
+    const { flow, store, publisher } = await buildTable(
+      tableSeed({
+        room: makeRoom({ status: 'LOBBY', round: 0, judgeId: null }),
+        rounds: []
+      })
+    );
 
-    await flow.playerReady(ROOM_CODE, PLAYER_ID);
+    await flow.playerReady(ROOM_CODE, 'player-a');
 
-    expect(rooms.readyToggles).toEqual([
-      { roomCode: ROOM_CODE, playerId: PLAYER_ID }
-    ]);
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: makeRoomPlayer({ isReady: true })
+          payload: roomPlayer('player-a', { isReady: true })
         }
       }
     ]);
+    expect((await playerIn(store, 'player-a')).isReady).toBe(true);
+  });
+
+  it('rejects the toggle mid-game, where ready means "played this Round"', async () => {
+    const { flow, publisher } = await buildTable();
+
+    await expect(flow.playerReady(ROOM_CODE, 'player-a')).rejects.toThrow(
+      BadRequestError
+    );
+    expect(publisher.published).toEqual([]);
   });
 });
