@@ -1,10 +1,11 @@
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import { BadRequestError } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
-import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
-import type { IRoomClock } from '@/services/round/IJudgeClock';
 import { toRoomPlayer } from '@/schemas';
 import type { Ranking, Room, Round } from '@/schemas';
+import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
+import type { IRoomClock } from '@/services/round/IJudgeClock';
+import type { Logger } from 'pino';
 import type { IRoomOrchestratorService } from './IRoomOrchestratorService';
 import type { GameStart } from './IRoomService';
 import { HAND_SIZE } from './gameRules';
@@ -22,7 +23,8 @@ export class RoomOrchestrator {
   constructor(
     private readonly rooms: IRoomOrchestratorService,
     private readonly judgeClock: IRoomClock,
-    private readonly publisher: IGameEventPublisher
+    private readonly publisher: IGameEventPublisher,
+    private readonly log?: Logger
   ) {}
 
   public async joinRoom(input: JoinRoomDTO): Promise<Room> {
@@ -32,6 +34,14 @@ export class RoomOrchestrator {
       payload: toRoomPlayer(input.player)
     });
     await this.dealLateJoiner(room, input.player.id);
+    this.log?.info(
+      {
+        event: 'room.player_joined',
+        roomCode: room.code,
+        playerId: input.player.id
+      },
+      'Player joined Room'
+    );
     return room;
   }
 
@@ -71,6 +81,15 @@ export class RoomOrchestrator {
         blackCard: start.blackCard
       }
     });
+    this.log?.info(
+      {
+        event: 'room.started',
+        roomCode,
+        roundId: start.round.id,
+        playerCount: start.players.length
+      },
+      'Room started'
+    );
   }
 
   private async publishHands(start: GameStart): Promise<void> {
@@ -93,11 +112,18 @@ export class RoomOrchestrator {
     });
     await this.broadcastHostDeparture(roomCode, playerId);
     await this.handleJudgeDeparture(roomCode, playerId, 'leave');
+    this.log?.info(
+      { event: 'room.player_left', roomCode, playerId },
+      'Player left Room'
+    );
   }
 
   // End the game for the Host. Same end-of-game path as the maxPoints win-condition,
   // and notify WS subscribers. Returns the final Ranking for the HTTP body. issue #1.
-  public async endRoom(roomCode: string, requesterId: string): Promise<Ranking> {
+  public async endRoom(
+    roomCode: string,
+    requesterId: string
+  ): Promise<Ranking> {
     const { hostId } = await this.rooms.getRoom(roomCode);
     if (requesterId !== hostId) {
       throw new BadRequestError(ROOM_ERRORS.IS_NOT_ROOM_HOST);
@@ -108,6 +134,10 @@ export class RoomOrchestrator {
       event: 'room.game-end',
       payload: ranking
     });
+    this.log?.info(
+      { event: 'room.ended', roomCode, reason: 'host' },
+      'Room ended'
+    );
     return ranking;
   }
 
@@ -119,7 +149,15 @@ export class RoomOrchestrator {
     playerId: string,
     isActive: boolean
   ): Promise<void> {
-    const player = await this.rooms.setPlayerActive(roomCode, playerId, isActive);
+    const player = await this.rooms.setPlayerActive(
+      roomCode,
+      playerId,
+      isActive
+    );
+    this.log?.debug(
+      { event: 'room.presence_changed', roomCode, playerId, isActive },
+      'Player presence changed'
+    );
     await this.publisher.publish(roomCode, {
       event: 'room.player-update',
       payload: toRoomPlayer(player)
@@ -148,7 +186,10 @@ export class RoomOrchestrator {
 
   // A reconnecting Judge resumes their held Round instead of having it aborted
   // when the grace lapses. ADR-0002.
-  private async handleJudgeReturn(roomCode: string, playerId: string): Promise<void> {
+  private async handleJudgeReturn(
+    roomCode: string,
+    playerId: string
+  ): Promise<void> {
     const round = await this.judgedRound(roomCode, playerId);
     if (round) {
       await this.judgeClock.onJudgeReturned(round.id);
@@ -156,7 +197,10 @@ export class RoomOrchestrator {
   }
 
   // The in-progress Round this Player is judging, or null.
-  private async judgedRound(roomCode: string, playerId: string): Promise<Round | null> {
+  private async judgedRound(
+    roomCode: string,
+    playerId: string
+  ): Promise<Round | null> {
     const room = await this.rooms.getRoom(roomCode);
     if (room.status !== 'IN_PROGRESS' || room.judgeId !== playerId) {
       return null;
@@ -178,6 +222,14 @@ export class RoomOrchestrator {
     const outcome = await this.rooms.handleHostLoss(roomCode, playerId);
 
     if (outcome.kind === 'host-reassigned') {
+      this.log?.info(
+        {
+          event: 'room.host_reassigned',
+          roomCode,
+          playerId: outcome.newHost.id
+        },
+        'Room Host reassigned'
+      );
       await this.publisher.publish(roomCode, {
         event: 'room.player-update',
         payload: toRoomPlayer(outcome.newHost)
@@ -186,6 +238,10 @@ export class RoomOrchestrator {
     }
 
     if (outcome.kind === 'room-ended') {
+      this.log?.info(
+        { event: 'room.ended', roomCode, reason: 'host_departed' },
+        'Room ended after Host departure'
+      );
       await this.publisher.publish(roomCode, {
         event: 'room.game-end',
         payload: outcome.ranking

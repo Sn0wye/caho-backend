@@ -1,4 +1,5 @@
 import { redis } from '@/db/redis';
+import { logger } from '@/lib/logger';
 import { Pubsub } from '@/lib/pub-sub';
 import { RoundTimekeeperFactory } from '@/services/round/RoundTimekeeperFactory';
 import { RoomOrchestrator } from './RoomOrchestrator';
@@ -11,6 +12,7 @@ export function RoomOrchestratorFactory(): RoomOrchestrator {
   return new RoomOrchestrator(
     RoomServiceFactory(),
     RoundTimekeeperFactory(),
-    new Pubsub(redis)
+    new Pubsub(redis, logger),
+    logger
   );
 }

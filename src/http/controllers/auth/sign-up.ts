@@ -1,7 +1,7 @@
 import type { App } from '@/app';
-import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 import { signUpRequest, signUpResponse } from '@/contracts';
 import { errorSchema } from '@/schemas';
+import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 
 export const signUpController = async (app: App) => {
   app.post(
@@ -22,6 +22,10 @@ export const signUpController = async (app: App) => {
 
       const { username, password } = req.body;
       const { cookie, user } = await authService.signUp(username, password);
+      req.log.info(
+        { event: 'auth.signed_up', userId: user.id, provider: 'password' },
+        'User registered'
+      );
 
       res.setCookie(cookie.name, cookie.value, cookie.attributes);
 

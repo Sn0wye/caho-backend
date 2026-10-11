@@ -29,7 +29,7 @@ ENV NODE_ENV=production
 EXPOSE 8080
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-# Read at startup by dist/migrate.js, including standalone Coolify deployments.
+# Read at startup by dist/migrate.js in the runtime image.
 COPY migrations ./migrations
 COPY package.json ./
 USER node

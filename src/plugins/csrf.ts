@@ -26,7 +26,10 @@ export const csrfPlugin = fastifyPlugin(
         !verifyRequestOrigin(originHeader, [hostHeader])
       ) {
         // TODO: verify this
-        console.error('Invalid origin', { originHeader, hostHeader });
+        req.log.warn(
+          { event: 'auth.origin_rejected' },
+          'Request origin rejected'
+        );
         return res.status(403);
       }
     });

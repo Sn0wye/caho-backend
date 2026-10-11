@@ -1,5 +1,6 @@
-import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
 import { toRoomPlayer } from '@/schemas';
+import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
+import type { Logger } from 'pino';
 import type { IRoundClock } from './IRoundClock';
 import type { IRoundFlowService } from './IRoundFlowService';
 
@@ -12,7 +13,8 @@ export class RoundFlow {
   constructor(
     private readonly rooms: IRoundFlowService,
     private readonly clock: IRoundClock,
-    private readonly publisher: IGameEventPublisher
+    private readonly publisher: IGameEventPublisher,
+    private readonly log?: Logger
   ) {}
 
   // A Player submits their answer for the current Round. Broadcasts the Player's
@@ -31,6 +33,15 @@ export class RoundFlow {
       roomCode,
       playerId,
       playedCardIds
+    );
+    this.log?.debug(
+      {
+        event: 'round.cards_played',
+        roomCode,
+        playerId,
+        playedCount: playedCardIds.length
+      },
+      'Player played cards'
     );
 
     await this.publisher.publish(roomCode, {
@@ -74,6 +85,16 @@ export class RoundFlow {
         judgePlayerId,
         winnerPlayerId
       });
+    this.log?.info(
+      {
+        event: 'round.winner_picked',
+        roomCode: room.code,
+        roundNumber: room.round,
+        winnerId: winnerPlayer.id,
+        newScore: winnerPlayer.score
+      },
+      'Judge picked Round winner'
+    );
 
     // One self-contained round end: the winning Played Card plus the winner's new
     // score (the card carries only a bare User and can't hold the score). The
@@ -90,6 +111,10 @@ export class RoundFlow {
     });
 
     if (gameEnded) {
+      this.log?.info(
+        { event: 'room.ended', roomCode: room.code, reason: 'max_points' },
+        'Room ended at maxPoints'
+      );
       await this.publisher.publish(room.code, {
         event: 'room.game-end',
         payload: ranking ?? []
@@ -98,6 +123,15 @@ export class RoundFlow {
     }
 
     const nextRound = await this.rooms.startNextRound(room.code, room.round);
+    this.log?.info(
+      {
+        event: 'round.started',
+        roomCode: room.code,
+        roundId: nextRound.id,
+        roundNumber: nextRound.roundNumber
+      },
+      'Next Round started'
+    );
 
     // Start the next Round's play clock (ADR-0003): a Redis TTL key whose expiry
     // advances the Round so an AFK Player can't stall it. issue #4.

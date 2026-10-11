@@ -19,12 +19,21 @@ export const env = createEnv({
     // cookie OAuth callbacks set here also reaches the frontend's server.
     COOKIE_DOMAIN: z.string().min(1).optional(),
     SEQ_URL: z.string().url().optional(),
-    SEQ_API_KEY: z.string().min(1).optional()
+    SEQ_API_KEY: z.string().min(1).optional(),
+    LOG_LEVEL: z
+      .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
+      .default('info'),
+    OTEL_SERVICE_NAME: z.string().min(1).default('caho-backend'),
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: z.string().url().optional(),
+    OTEL_TRACES_SAMPLER_ARG: z.coerce.number().min(0).max(1).default(1),
+    OTEL_SDK_DISABLED: z.enum(['true', 'false']).default('false')
   },
   runtimeEnv: {
     ...process.env,
     COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || undefined,
     SEQ_URL: process.env.SEQ_URL || undefined,
-    SEQ_API_KEY: process.env.SEQ_API_KEY || undefined
+    SEQ_API_KEY: process.env.SEQ_API_KEY || undefined,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:
+      process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || undefined
   }
 });

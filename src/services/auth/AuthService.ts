@@ -71,7 +71,9 @@ export class AuthService {
   public async signIn(username: string, password: string) {
     const user = await this.userRepository.findByUsername(username);
 
-    if (!user) {
+    // OAuth-only Users store an empty hash; argon2 throws on it instead of
+    // returning false, which surfaced as a 500 rather than a rejected sign-in.
+    if (!user?.password) {
       throw new UnauthorizedError('Usuário ou senha inválidos');
     }
 
@@ -176,10 +178,12 @@ export class AuthService {
       };
     } catch (e) {
       if (e instanceof OAuth2RequestError || e instanceof ArcticFetchError) {
-        throw new BadRequestError('Invalid code');
+        throw new BadRequestError('Invalid code', { cause: e });
       }
 
-      throw new InternalServerError('Failed to sign in with GitHub');
+      throw new InternalServerError('Failed to sign in with GitHub', {
+        cause: e
+      });
     }
   }
 
@@ -256,10 +260,12 @@ export class AuthService {
       };
     } catch (e) {
       if (e instanceof OAuth2RequestError || e instanceof ArcticFetchError) {
-        throw new BadRequestError('Invalid code');
+        throw new BadRequestError('Invalid code', { cause: e });
       }
 
-      throw new InternalServerError('Failed to sign in with Google');
+      throw new InternalServerError('Failed to sign in with Google', {
+        cause: e
+      });
     }
   }
 

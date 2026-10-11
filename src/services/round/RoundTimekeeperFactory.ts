@@ -1,9 +1,10 @@
 import { redis } from '@/db/redis';
+import { logger } from '@/lib/logger';
 import { Pubsub } from '@/lib/pub-sub';
-import { RoundRepository } from '@/repositories/round/RoundRepository';
 import { RoundPlayedCardsRepositoryFactory } from '@/repositories/round-played-cards';
+import { RoundRepository } from '@/repositories/round/RoundRepository';
 import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
-import { RoundTimekeeper } from './RoundTimekeeper';
+import { DEFAULT_ROUND_TIMER_CONFIG, RoundTimekeeper } from './RoundTimekeeper';
 import { RoundTimerStore } from './RoundTimerStore';
 
 // Wires the production RoundTimekeeper: ioredis store, the Round repo (as the
@@ -16,6 +17,8 @@ export function RoundTimekeeperFactory(): RoundTimekeeper {
     new RoundRepository(),
     RoundPlayedCardsRepositoryFactory(),
     RoomServiceFactory(),
-    new Pubsub(redis)
+    new Pubsub(redis, logger),
+    DEFAULT_ROUND_TIMER_CONFIG,
+    logger
   );
 }

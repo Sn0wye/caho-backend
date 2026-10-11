@@ -2,4 +2,6 @@
 
 Cards against humanity online!
 
-Deployment instructions: [Docker and Coolify](docs/deployment.md).
+Deployment instructions: [Build and run](docs/deployment.md).
+
+Seq configuration: [Logs and traces](docs/deployment.md#seq-logs-and-traces).

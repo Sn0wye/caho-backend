@@ -1,4 +1,7 @@
 import type { App } from '@/app';
+import { completeSocketUpgrade } from '@/http/request-observability';
+import { SocketSession } from '@/http/socket-session';
+import { SocketSessions } from '@/http/socket-session';
 import { logger } from '@/lib/logger';
 import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
 import type { FastifyRequest } from 'fastify';
@@ -19,6 +22,8 @@ const sessionUserId = (req: FastifyRequest): string | null => {
 
 export const wsRoutes = async (app: App) => {
   const roomOrchestrator = RoomOrchestratorFactory();
+  const sessions = new SocketSessions();
+  app.addHook('onClose', () => sessions.close());
 
   // The per-user socket's close is attributable to a userId (unlike the Room
   // socket, keyed by Code), so it drives presence: a drop marks the Player
@@ -35,7 +40,16 @@ export const wsRoutes = async (app: App) => {
       } catch (error) {
         // A concurrent Leave can delete the row mid-flight; skip that Room
         // rather than tear down the socket handler.
-        logger.warn({ userId, roomCode, isActive, error }, 'presence broadcast failed');
+        logger.warn(
+          {
+            event: 'ws.presence_broadcast_failed',
+            userId,
+            roomCode,
+            isActive,
+            err: error
+          },
+          'presence broadcast failed'
+        );
       }
     }
   };
@@ -53,23 +67,24 @@ export const wsRoutes = async (app: App) => {
       }
     },
     async (conn, req) => {
+      completeSocketUpgrade(req);
       if (!sessionUserId(req)) {
+        req.log.warn(
+          { event: 'ws.auth_rejected', reason: 'unauthenticated' },
+          'WebSocket rejected'
+        );
         conn.socket.close(WS_POLICY_VIOLATION, 'unauthenticated');
         return;
       }
 
-      const disconnect = await app.pubsub.subscribe(
-        req.params.roomCode,
-        message => {
-          conn.socket.send(JSON.stringify(message));
-        }
+      sessions.open(
+        new SocketSession(
+          conn.socket,
+          req.log,
+          req.params.roomCode,
+          (channel, receive) => app.pubsub.subscribe(channel, receive)
+        )
       );
-
-      conn.socket.on('ping', () => {
-        conn.socket.pong();
-      });
-
-      conn.socket.on('close', disconnect);
     }
   );
 
@@ -86,29 +101,32 @@ export const wsRoutes = async (app: App) => {
       }
     },
     async (conn, req) => {
+      completeSocketUpgrade(req);
       const { userId } = req.params;
       // This channel carries the private Hand and drives presence, so only its
       // owner may open it. Unauthenticated, anyone could read any Player's cards
       // and mark them inactive by opening and closing a socket.
       if (sessionUserId(req) !== userId) {
+        req.log.warn(
+          { event: 'ws.auth_rejected', reason: 'forbidden' },
+          'WebSocket rejected'
+        );
         conn.socket.close(WS_POLICY_VIOLATION, 'forbidden');
         return;
       }
 
-      const disconnect = await app.pubsub.subscribe(userId, message => {
-        conn.socket.send(JSON.stringify(message));
-      });
-
-      await broadcastPresence(userId, true);
-
-      conn.socket.on('ping', () => {
-        conn.socket.pong();
-      });
-
-      conn.socket.on('close', async () => {
-        await disconnect();
-        await broadcastPresence(userId, false);
-      });
+      sessions.open(
+        new SocketSession(
+          conn.socket,
+          req.log,
+          userId,
+          (channel, receive) => app.pubsub.subscribe(channel, receive),
+          {
+            connected: () => broadcastPresence(userId, true),
+            disconnected: () => broadcastPresence(userId, false)
+          }
+        )
+      );
     }
   );
 };

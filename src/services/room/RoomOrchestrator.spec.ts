@@ -1,3 +1,5 @@
+import { buildLogger } from '@/lib/logger';
+import { FakeConsoleOutput } from '@/lib/logger.fakes';
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import { BadRequestError } from '@/errors';
 import type { Player, Ranking, Room, RoomPlayer, Round } from '@/schemas';
@@ -86,6 +88,7 @@ function makeRound(): Round {
 const NOT_HOST: HostLossOutcome = { kind: 'not-host' };
 
 type Harness = {
+  output: FakeConsoleOutput;
   orchestrator: RoomOrchestrator;
   rooms: FakeRoomOrchestratorService;
   clock: FakeJudgeClock;
@@ -96,8 +99,11 @@ function build(state: Partial<RoomOrchestratorState>): Harness {
   const rooms = new FakeRoomOrchestratorService(state);
   const clock = new FakeJudgeClock();
   const publisher = new FakeGameEventPublisher();
+  const output = new FakeConsoleOutput();
+  const { logger } = buildLogger({ consoleOutput: output });
   return {
-    orchestrator: new RoomOrchestrator(rooms, clock, publisher),
+    output,
+    orchestrator: new RoomOrchestrator(rooms, clock, publisher, logger),
     rooms,
     clock,
     publisher
@@ -358,5 +364,15 @@ describe('RoomOrchestrator.endRoom', () => {
       BadRequestError
     );
     expect(rooms.endGameCalls).toHaveLength(0);
+  });
+});
+
+
+describe('Room lifecycle logging', () => {
+  it('records membership changes without the password or private Hand', async () => {
+    const { orchestrator, output } = build({ room: makeRoom({ status: 'LOBBY', password: 'private-password' }) });
+    await orchestrator.joinRoom({ roomCode: ROOM_CODE, password: 'private-password', player: makePlayer({ cardIds: ['private-card'] }) });
+    expect(JSON.parse(output.lines[0])).toMatchObject({ event: 'room.player_joined', roomCode: ROOM_CODE, playerId: 'player-a' });
+    expect(output.lines.join('')).not.toMatch(/private-/);
   });
 });

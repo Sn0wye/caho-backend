@@ -1,3 +1,4 @@
+import { STATUS_CODES } from 'node:http';
 import {
   BadRequestError,
   ForbiddenError,
@@ -6,7 +7,7 @@ import {
   UnauthorizedError,
   UnprocessableEntityError
 } from '@/errors';
-import { STATUS_CODES } from 'node:http';
+import { recordRequestFailure } from '@/http/request-observability';
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
@@ -16,7 +17,7 @@ type Reply = Parameters<FastifyInstance['errorHandler']>[2];
 // the trailing 500, sending a second reply. ForbiddenError used to map to 500.
 export const fastifyErrorHandler: FastifyInstance['errorHandler'] = (
   error,
-  _req,
+  req,
   res
 ) => {
   if (error instanceof ZodError) {
@@ -26,16 +27,23 @@ export const fastifyErrorHandler: FastifyInstance['errorHandler'] = (
     });
   }
 
-  return sendApplicationError(error, res);
+  const statusCode = statusCodeOf(error);
+  if (statusCode === 500) {
+    req.log.error(
+      { err: error, event: 'http.exception' },
+      'Unhandled HTTP failure'
+    );
+    recordRequestFailure(req, error);
+  }
+
+  return sendApplicationError(error, statusCode, res);
 };
 
-function sendApplicationError(error: Error, res: Reply) {
-  const statusCode = statusCodeOf(error);
-  const unexpected = statusCode === 500 && !(error instanceof InternalServerError);
-
-  // Unexpected errors may carry driver or library internals; log them, but
-  // don't send them to the client.
-  if (unexpected) res.log.error(error);
+function sendApplicationError(error: Error, statusCode: number, res: Reply) {
+  // Unexpected errors may carry driver or library internals; they are logged
+  // above, but never sent to the client.
+  const unexpected =
+    statusCode === 500 && !(error instanceof InternalServerError);
 
   // Send the `errorSchema` shape explicitly. Routes declare it for their error
   // responses, and a bare `{ message }` fails serialization, replacing the
