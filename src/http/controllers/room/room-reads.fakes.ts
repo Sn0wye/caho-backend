@@ -1,4 +1,5 @@
-import type { WhiteCard } from '@/schemas';
+import type { IRoomRepository } from '@/repositories/room';
+import type { RoomPlayer, WhiteCard } from '@/schemas';
 import { CardService } from '@/services/CardService';
 import { FakeCardRepository } from '@/services/CardService.fakes';
 import {
@@ -9,7 +10,7 @@ import {
 
 // One in-memory Room behind the real RoomService, so the Room read routes can be
 // exercised over HTTP without Postgres. Each Player holds a distinct Hand, and
-// the Judge carries the stored `isJudge` flag, so a leak of either is visible.
+// the Judge carries the derived `isJudge` flag, so a leak of either is visible.
 // See issue #27.
 
 export const CALLER_ID = 'player-caller';
@@ -45,12 +46,43 @@ export const roomReadsFixture = buildService({
   playedCards: []
 });
 
-// Stands in for CardServiceFactory: the real CardService over an in-memory pool
-// holding every Player's Hand.
-export function fakeRoomReadsCardService(roomCode: string): CardService {
+// What GET /:roomCode/players must return for the fixture: the public RoomPlayer
+// view of each Player, written out by hand so it can't mirror toRoomPlayer.
+export const EXPECTED_ROOM_PLAYERS: RoomPlayer[] = [
+  {
+    id: CALLER_ID,
+    username: 'caller',
+    avatarUrl: null,
+    isHost: false,
+    isReady: false,
+    isActive: true,
+    score: 0
+  },
+  {
+    id: JUDGE_ID,
+    username: 'judge',
+    avatarUrl: null,
+    isHost: true,
+    isReady: false,
+    isActive: true,
+    score: 2
+  }
+];
+
+/**
+ * Stands in for CardServiceFactory: the real CardService over an in-memory pool
+ * holding every Player's Hand.
+ *
+ * @example
+ * buildRoomReadsCardService(ROOM_CODE, roomReadsFixture.fakes.room);
+ */
+export function buildRoomReadsCardService(
+  roomCode: string,
+  rooms: IRoomRepository
+): CardService {
   return new CardService(
     roomCode,
     new FakeCardRepository([...CALLER_HAND, ...JUDGE_HAND], []),
-    roomReadsFixture.fakes.room
+    rooms
   );
 }

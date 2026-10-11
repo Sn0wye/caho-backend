@@ -1,6 +1,8 @@
+import type { App } from '@/app';
+import type { Session, SessionUser } from '@/auth/session-types';
 import { fastifyErrorHandler } from '@/http/error-handler';
 import { ROOM_CODE } from '@/services/room/RoomService.fixtures';
-import { fastify } from 'fastify';
+import { type FastifyRequest, fastify } from 'fastify';
 import {
   type ZodTypeProvider,
   serializerCompiler,
@@ -12,8 +14,8 @@ import { getRoomPlayersController } from './get-room-players';
 import {
   CALLER_HAND,
   CALLER_ID,
-  JUDGE_ID,
-  fakeRoomReadsCardService,
+  EXPECTED_ROOM_PLAYERS,
+  buildRoomReadsCardService,
   roomReadsFixture
 } from './room-reads.fakes';
 
@@ -23,33 +25,40 @@ vi.mock('@/services/room/RoomServiceFactory', () => ({
   RoomServiceFactory: () => roomReadsFixture.service
 }));
 vi.mock('@/services/CardServiceFactory', () => ({
-  CardServiceFactory: (roomCode: string) => fakeRoomReadsCardService(roomCode)
+  CardServiceFactory: (roomCode: string) =>
+    buildRoomReadsCardService(roomCode, roomReadsFixture.fakes.room)
 }));
 
-// Signed in as the caller, a non-Judge Player. Replace with the full app via
-// app.inject() once #26 lands.
-function buildRoomReadsApp() {
+const CALLER: SessionUser = {
+  id: CALLER_ID,
+  name: null,
+  username: 'caller',
+  email: null,
+  avatarUrl: null,
+  providerId: null,
+  providerUserId: null
+};
+
+const CALLER_SESSION: Session = {
+  id: 'session-1',
+  userId: CALLER_ID,
+  expiresAt: new Date(),
+  fresh: false
+};
+
+// Signed in as the caller, a non-Judge Player.
+async function signInAsCaller(request: FastifyRequest): Promise<void> {
+  request.getUser = () => CALLER;
+  request.getSession = () => CALLER_SESSION;
+}
+
+// Replace with the full app via app.inject() once #26 lands.
+function buildRoomReadsApp(): App {
   const app = fastify().withTypeProvider<ZodTypeProvider>();
   app.setSerializerCompiler(serializerCompiler);
   app.setValidatorCompiler(validatorCompiler);
   app.setErrorHandler(fastifyErrorHandler);
-  app.addHook('onRequest', async request => {
-    request.getUser = () => ({
-      id: CALLER_ID,
-      name: null,
-      username: 'caller',
-      email: null,
-      avatarUrl: null,
-      providerId: null,
-      providerUserId: null
-    });
-    request.getSession = () => ({
-      id: 'session-1',
-      userId: CALLER_ID,
-      expiresAt: new Date(),
-      fresh: false
-    });
-  });
+  app.addHook('onRequest', signInAsCaller);
   app.register(getRoomPlayersController);
   app.register(getCurrentWhiteCardsController);
   return app;
@@ -66,26 +75,7 @@ describe('GET /:roomCode/players', () => {
     const response = await app.inject(`/${ROOM_CODE}/players`);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual([
-      {
-        id: CALLER_ID,
-        username: 'caller',
-        avatarUrl: null,
-        isHost: false,
-        isReady: false,
-        isActive: true,
-        score: 0
-      },
-      {
-        id: JUDGE_ID,
-        username: 'judge',
-        avatarUrl: null,
-        isHost: true,
-        isReady: false,
-        isActive: true,
-        score: 2
-      }
-    ]);
+    expect(response.json()).toEqual(EXPECTED_ROOM_PLAYERS);
   });
 
   // Regression for #27: the raw Player rows exposed every Player's Hand.
