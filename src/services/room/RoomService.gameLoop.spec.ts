@@ -9,112 +9,11 @@ import {
   makeRound
 } from './RoomService.fixtures';
 
-// Regression specs for the gaps that broke the loop past Round 1: the Room
-// update keyed by id instead of Code, Players never reset to unready, the Judge
-// repeating, and picks/plays outside their phase.
+// Regression specs for the gaps that broke the loop past Round 1: plays outside
+// their phase and lobby-only rules. Rotation and Judge picks moved to
+// RoundLifecycle.spec (#25).
 
 const judge = () => makePlayer({ id: 'player-judge', isJudge: true });
-
-describe('RoomService.startNextRound', () => {
-  function buildRotation(roomOverrides = {}) {
-    return buildService({
-      room: makeRoom({ round: 1, judgeId: 'player-judge', ...roomOverrides }),
-      players: [
-        judge(),
-        makePlayer({ id: 'player-a', isReady: true }),
-        makePlayer({ id: 'player-b', isReady: true })
-      ],
-      rounds: [makeRound({ status: 'COMPLETE' })],
-    });
-  }
-
-  it('advances the Room round number and records the outgoing Judge', async () => {
-    const { service } = await buildRotation();
-
-    const next = await service.startNextRound(ROOM_CODE, 1);
-
-    const room = await service.getRoom(ROOM_CODE);
-    expect(next.roundNumber).toBe(2);
-    expect(room.round).toBe(2);
-    expect(room.judgeId).toBe(next.judgeId);
-    expect(room.prevJudgeId).toBe('player-judge');
-  });
-
-  it('never hands the Judge role straight back to the outgoing Judge', async () => {
-    for (let i = 0; i < 20; i++) {
-      const { service } = await buildRotation();
-      const next = await service.startNextRound(ROOM_CODE, 1);
-      expect(next.judgeId).not.toBe('player-judge');
-    }
-  });
-
-  it('resets every Player to unready so they can play the new Round', async () => {
-    const { service, store } = await buildRotation();
-
-    await service.startNextRound(ROOM_CODE, 1);
-
-    const players = await store.players.getRoomPlayersByCode(ROOM_CODE);
-    expect(players.every(player => !player.isReady)).toBe(true);
-  });
-
-  it('rejects a stale rotation for a Round the Room already left', async () => {
-    const { service } = await buildRotation({ round: 2 });
-
-    await expect(service.startNextRound(ROOM_CODE, 1)).rejects.toThrow(BadRequestError);
-  });
-
-  it('refuses to open a Round once the Room is FINISHED', async () => {
-    const { service } = await buildRotation({ status: 'FINISHED' });
-
-    await expect(service.startNextRound(ROOM_CODE, 1)).rejects.toThrow(BadRequestError);
-  });
-});
-
-describe('RoomService.processJudgeChooseWinner phase rules', () => {
-  function buildJudging(status: 'PLAYING' | 'JUDGING' = 'JUDGING') {
-    return buildService({
-      room: makeRoom(),
-      players: [judge(), makePlayer({ id: 'player-winner' })],
-      rounds: [makeRound({ status })],
-      playedCards: [makePlayedCards('player-winner')]
-    });
-  }
-
-  const pick = { roomCode: ROOM_CODE, judgePlayerId: 'player-judge', winnerPlayerId: 'player-winner' };
-
-  it('rejects a pick while the Round is still playing', async () => {
-    const { service } = await buildJudging('PLAYING');
-
-    await expect(service.processJudgeChooseWinner(pick)).rejects.toThrow(BadRequestError);
-  });
-
-  it('rejects a pick from anyone but the Judge', async () => {
-    const { service } = await buildJudging();
-
-    await expect(
-      service.processJudgeChooseWinner({ ...pick, judgePlayerId: 'player-winner' })
-    ).rejects.toThrow(ForbiddenError);
-  });
-
-  it('scores once and rejects a repeated pick (double-click)', async () => {
-    const { service, store } = await buildJudging();
-
-    await service.processJudgeChooseWinner(pick);
-    await expect(service.processJudgeChooseWinner(pick)).rejects.toThrow(BadRequestError);
-
-    const winner = await store.players.getPlayerFromRoom(ROOM_CODE, 'player-winner');
-    expect(winner?.score).toBe(1);
-    expect((await store.rounds.findById('round-1'))?.status).toBe('COMPLETE');
-  });
-
-  it('rejects a winner who did not play this Round', async () => {
-    const { service } = await buildJudging();
-
-    await expect(
-      service.processJudgeChooseWinner({ ...pick, winnerPlayerId: 'player-judge' })
-    ).rejects.toThrow(BadRequestError);
-  });
-});
 
 describe('RoomService.playCards rules', () => {
   const hand = ['w1', 'w2', 'w3'];
@@ -162,20 +61,6 @@ describe('RoomService.playCards rules', () => {
   });
 });
 
-describe('RoomService.endGame stops the Round clock', () => {
-  it('aborts the in-flight Round so its timers become no-ops', async () => {
-    const { service, store } = await buildService({
-      room: makeRoom(),
-      players: [judge()],
-      rounds: [makeRound({ status: 'PLAYING' })],
-    });
-
-    await service.endGame(ROOM_CODE);
-
-    expect((await store.rounds.findById('round-1'))?.status).toBe('ABORTED');
-  });
-});
-
 describe('RoomService.startGame', () => {
   function buildLobby(guestReady = true) {
     return buildService({
@@ -189,15 +74,17 @@ describe('RoomService.startGame', () => {
     });
   }
 
-  it('opens Round 1 with a Judge, a Black Card and a dealt Hand per Player', async () => {
+  it('picks the first Judge and Black Card and deals a Hand per Player', async () => {
     const { service, store } = await buildLobby();
 
     const start = await service.startGame(ROOM_CODE, 'host');
 
     expect(start.room.status).toBe('IN_PROGRESS');
     expect(start.room.round).toBe(1);
-    expect(start.round).toEqual(expect.objectContaining({ roundNumber: 1, status: 'PLAYING' }));
-    expect(start.round.judgeId).toBe(start.room.judgeId);
+    expect(start.judgeId).toBe(start.room.judgeId);
+    expect(start.room.currentBlackCardId).toBe(start.blackCard.id);
+    // Round 1 itself is opened by RoundLifecycle (#25).
+    expect(await store.rounds.find(ROOM_CODE, 1)).toBeNull();
     expect(start.hands.map(hand => hand.cards.length)).toEqual([10, 10, 10]);
     const players = await store.players.getRoomPlayersByCode(ROOM_CODE);
     expect(players.every(player => !player.isReady)).toBe(true);
@@ -281,31 +168,5 @@ describe('RoomService.getRoundSnapshot', () => {
     const snapshot = await service.getRoundSnapshot(ROOM_CODE);
 
     expect(snapshot?.roundPlayedCards).toHaveLength(1);
-  });
-});
-
-// isJudge is derived from the Room, so after a rotation the outgoing Judge must
-// play and the incoming one is no longer awaited. A stored flag got this wrong.
-describe('RoomService "everyone has played" across a Judge rotation', () => {
-  const ids = ['player-judge', 'player-a', 'player-b'];
-
-  it('awaits the outgoing Judge, skips the new one, then reports all played', async () => {
-    const { service } = await buildService({
-      room: makeRoom({ judgeId: 'player-judge' }),
-      players: ids.map(id => makePlayer({ id, cardIds: [`${id}-card`] })),
-      rounds: [makeRound({ status: 'COMPLETE' })]
-    });
-
-    const next = await service.startNextRound(ROOM_CODE, 1);
-    const contenders = ids.filter(id => id !== next.judgeId);
-    for (const id of contenders) {
-      expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(false);
-      await service.playCards(ROOM_CODE, id, [`${id}-card`]);
-    }
-
-    expect(contenders).toContain('player-judge');
-    expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(true);
-    const playedCards = await service.getRoundPlayedCards(ROOM_CODE, 2);
-    expect(playedCards.map(entry => entry.player.id).sort()).toEqual(contenders.sort());
   });
 });

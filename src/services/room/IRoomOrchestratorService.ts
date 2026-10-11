@@ -1,11 +1,11 @@
 import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
-import type { Player, Ranking, Room, Round, WhiteCard } from '@/schemas';
+import type { Player, Ranking, Room, WhiteCard } from '@/schemas';
 import type { GameStart, HostLossOutcome } from './IRoomService';
 
 // The slice of IRoomService that RoomOrchestrator needs (ISP): membership
-// (join/leave), the end-game projection, presence toggling, and the
-// status-dependent Host/Judge departure reads. Carved off the god IRoomService so
+// (join/leave/ready), the end-game projection, presence toggling, and the
+// status-dependent Host departure reads. Carved off the god IRoomService so
 // the orchestrator depends only on what it uses. RoomService implements the
 // full interface, so it satisfies this; specs drive it over InMemoryGameStore
 // (issue #24). ADR-0004.
@@ -25,6 +25,6 @@ export interface IRoomOrchestratorService {
     playerId: string,
     isActive: boolean
   ): Promise<Player>;
-  getActiveRound(roomCode: string): Promise<Round | null>;
+  togglePlayerReady(roomCode: string, playerId: string): Promise<Player>;
   getPlayerRoomCodes(playerId: string): Promise<string[]>;
 }

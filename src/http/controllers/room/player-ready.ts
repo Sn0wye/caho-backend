@@ -1,10 +1,10 @@
 import type { App } from '@/app';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoundFlowFactory } from '@/services/round/RoundFlowFactory';
+import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
 import { z } from 'zod';
 
 export const playerReadyController = async (app: App) => {
-  const roundFlow = RoundFlowFactory();
+  const roomOrchestrator = RoomOrchestratorFactory();
 
   app.register(ensureAuth).post(
     '/:roomCode/ready',
@@ -22,7 +22,7 @@ export const playerReadyController = async (app: App) => {
       const userId = req.getUser().id;
       const { roomCode } = req.params;
 
-      await roundFlow.playerReady(roomCode, userId);
+      await roomOrchestrator.playerReady(roomCode, userId);
 
       // An async handler resolving undefined never replies in Fastify 4.
       return res.status(204).send();

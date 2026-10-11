@@ -1,6 +1,6 @@
 import type { Player, Room } from '@/schemas';
 import { describe, expect, it } from 'vitest';
-import { assertRoomCanStart } from './gameRules';
+import { assertCanRotate, assertRoomCanStart } from './gameRules';
 
 const room = { code: 'ABC123', hostId: 'host', status: 'LOBBY' } as Room;
 
@@ -38,5 +38,21 @@ describe('assertRoomCanStart', () => {
     expect(() =>
       assertRoomCanStart({ ...room, status: 'IN_PROGRESS' }, trio, 'host')
     ).toThrow('IN_PROGRESS');
+  });
+});
+
+describe('assertCanRotate', () => {
+  const inProgress = { ...room, status: 'IN_PROGRESS', round: 2 } as Room;
+
+  it('lets the current Round rotate', () => {
+    expect(() => assertCanRotate(inProgress, 2)).not.toThrow();
+  });
+
+  it('rejects a stale Round the Room already left', () => {
+    expect(() => assertCanRotate(inProgress, 1)).toThrow('rodada 2');
+  });
+
+  it('rejects a Room that is no longer in progress', () => {
+    expect(() => assertCanRotate({ ...inProgress, status: 'FINISHED' }, 2)).toThrow('FINISHED');
   });
 });

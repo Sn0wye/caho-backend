@@ -32,7 +32,7 @@ import { logger } from './lib/logger';
 import { Pubsub } from './lib/pub-sub';
 import { traceBackground } from './lib/tracing';
 import { authPlugin } from './plugins/auth';
-import { RoundTimekeeperFactory } from './services/round/RoundTimekeeperFactory';
+import { RoundLifecycleFactory } from './services/round/RoundLifecycleFactory';
 import { ensureExpiryNotifications } from './services/round/ensureExpiryNotifications';
 import { subscribeRoundExpiry } from './services/round/subscribeRoundExpiry';
 
@@ -62,12 +62,12 @@ installHttpObservability(app);
 let unsubscribeRoundExpiry: (() => Promise<void>) | null = null;
 if (env.NODE_ENV !== 'test') {
   app.addHook('onReady', async () => {
-    const timekeeper = RoundTimekeeperFactory();
+    const rounds = RoundLifecycleFactory();
     await ensureExpiryNotifications(redis, logger);
-    await traceBackground('round.reconcile', {}, () => timekeeper.reconcile());
+    await traceBackground('round.reconcile', {}, () => rounds.reconcile());
     unsubscribeRoundExpiry = await subscribeRoundExpiry(
       redis,
-      timekeeper,
+      rounds,
       logger,
       redis.options.db ?? 0
     );

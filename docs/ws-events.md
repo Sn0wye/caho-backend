@@ -176,7 +176,8 @@ no plays:
   → room.round-end        { roundNumber, winner:null, winnerId:null, newScore:null, reason:'aborted' }
   → room.round-start      { roundNumber+1, judgeId, blackCard }   (Judge rotates)
 
-Host POST /end (any time):
+Host POST /end (any time), or the Host leaves mid-game with no active heir:
+  → room.round-end        { roundNumber, winner:null, …, reason:'aborted' }   (only if a Round was in play; no next Round)
   → room.game-end         Ranking
 ```
 

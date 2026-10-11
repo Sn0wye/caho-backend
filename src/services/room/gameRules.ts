@@ -35,3 +35,19 @@ export function assertRoomCanStart(
     throw new BadRequestError(ROOM_ERRORS.NOT_ALL_PLAYERS_READY);
   }
 }
+
+// Guards a Judge rotation out of `currentRound`: a stale number (another path
+// already rotated) or a finished Room is rejected so two paths can't open two
+// Rounds. Example: assertCanRotate(room, round.roundNumber)
+export function assertCanRotate(room: Room, currentRound: number): void {
+  if (room.status !== 'IN_PROGRESS') {
+    throw new BadRequestError(
+      `Não há próxima rodada: a sala ${room.code} está ${room.status}, esperado IN_PROGRESS.`
+    );
+  }
+  if (room.round !== currentRound) {
+    throw new BadRequestError(
+      `Rodada ${currentRound} já encerrada; a sala ${room.code} está na rodada ${room.round}.`
+    );
+  }
+}

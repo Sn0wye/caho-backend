@@ -4,11 +4,6 @@ import type { IRoomRepository } from '@/repositories/room';
 import type { IRoomPlayersRepository } from '@/repositories/room-players';
 import type { IRoundRepository } from '@/repositories/round';
 import type { IRoundPlayedCardsRepository } from '@/repositories/round-played-cards';
-import type { IRoundTimerRepository } from '@/services/round/IRoundTimerRepository';
-
-// Everything the game loop reads/writes about a Round: the RoomService surface
-// plus the timer engine's lookup and expired-active sweep (ADR-0003).
-export type IGameRoundRepository = IRoundRepository & IRoundTimerRepository;
 
 /**
  * The persistence the game loop needs, as one seam with two adapters: Postgres
@@ -27,7 +22,7 @@ export interface IGameStore {
   readonly rooms: IRoomRepository;
   readonly players: IRoomPlayersRepository;
   readonly ranking: IRankingRepository;
-  readonly rounds: IGameRoundRepository;
+  readonly rounds: IRoundRepository;
   readonly playedCards: IRoundPlayedCardsRepository;
   readonly cards: ICardRepository;
 }

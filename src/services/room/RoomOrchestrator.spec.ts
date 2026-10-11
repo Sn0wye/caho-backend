@@ -7,9 +7,12 @@ import {
   makeBlackCard
 } from '@/repositories/game-store/gameStore.fixtures';
 import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
+import { RoundLifecycle } from '@/services/round/RoundLifecycle';
+import { FakeRoundTimerStore } from '@/services/round/RoundTimerStore.fakes';
+import { graceKey, playKey } from '@/services/round/deadlineKeys';
 import { describe, expect, it } from 'vitest';
+import { BlackCardDeck } from './BlackCardDeck';
 import { RoomOrchestrator } from './RoomOrchestrator';
-import { FakeJudgeClock } from './RoomOrchestrator.fakes';
 import {
   ROOM_CODE,
   buildService,
@@ -20,10 +23,11 @@ import {
   makeRound
 } from './RoomService.fixtures';
 
-// RoomOrchestrator over the real RoomService on one InMemoryGameStore. Only the
-// Judge clock (RoundTimekeeper's slice, covered by its own spec) and the
-// publisher are faked, so membership, Host and Judge fallout come from the
-// rules themselves rather than scripted outcomes. See issue #24.
+// RoomOrchestrator over the real RoomService and RoundLifecycle on one
+// InMemoryGameStore. Only Redis (the deadline store) and the publisher are
+// faked, so membership, Host and Round fallout come from the rules themselves
+// rather than scripted outcomes. Round rules live in RoundLifecycle.spec; here
+// we check presence and membership reach them. See issues #24, #25.
 
 const HOST_ID = 'host';
 const JUDGE_ID = 'player-judge';
@@ -31,7 +35,7 @@ const JUDGE_ID = 'player-judge';
 type Harness = {
   orchestrator: RoomOrchestrator;
   store: InMemoryGameStore;
-  clock: FakeJudgeClock;
+  timers: FakeRoundTimerStore;
   publisher: FakeGameEventPublisher;
   output: FakeConsoleOutput;
 };
@@ -65,12 +69,19 @@ function lobbySeed(overrides: Partial<GameSeed> = {}): GameSeed {
 
 async function build(seed: GameSeed = gameSeed()): Promise<Harness> {
   const { service, store } = await buildService(seed);
-  const clock = new FakeJudgeClock();
+  const timers = new FakeRoundTimerStore();
   const publisher = new FakeGameEventPublisher();
   const output = new FakeConsoleOutput();
   const { logger } = buildLogger({ consoleOutput: output });
-  const orchestrator = new RoomOrchestrator(service, clock, publisher, logger);
-  return { orchestrator, store, clock, publisher, output };
+  const rounds = new RoundLifecycle(
+    store,
+    service,
+    new BlackCardDeck(store),
+    timers,
+    publisher
+  );
+  const orchestrator = new RoomOrchestrator(service, rounds, publisher, logger);
+  return { orchestrator, store, timers, publisher, output };
 }
 
 describe('RoomOrchestrator.joinRoom', () => {
@@ -159,7 +170,7 @@ describe('RoomOrchestrator.startRoom', () => {
   }
 
   it('broadcasts the sanitized start, sends each Hand privately, arms Round 1 and announces it', async () => {
-    const { orchestrator, store, clock, publisher } = await build(readyLobby());
+    const { orchestrator, store, timers, publisher } = await build(readyLobby());
 
     await orchestrator.startRoom(ROOM_CODE, HOST_ID);
 
@@ -176,7 +187,8 @@ describe('RoomOrchestrator.startRoom', () => {
       'player-a',
       'player-b'
     ]);
-    expect(clock.armedPlayRoundIds).toEqual([round?.id]);
+    expect(round?.judgeId).toBe(room?.judgeId);
+    expect(timers.armed.get(playKey(round?.id ?? ''))).toBe(60);
     expect(publisher.published.at(-1)?.event).toEqual({
       event: 'room.round-start',
       payload: {
@@ -188,19 +200,19 @@ describe('RoomOrchestrator.startRoom', () => {
   });
 
   it('refuses a start from a non-Host and announces nothing', async () => {
-    const { orchestrator, clock, publisher } = await build(readyLobby());
+    const { orchestrator, timers, publisher } = await build(readyLobby());
 
     await expect(orchestrator.startRoom(ROOM_CODE, 'player-a')).rejects.toThrow(
       BadRequestError
     );
     expect(publisher.published).toEqual([]);
-    expect(clock.armedPlayRoundIds).toEqual([]);
+    expect(timers.armed.size).toBe(0);
   });
 });
 
 describe('RoomOrchestrator.leaveRoom', () => {
   it('removes the Player and announces the leave with no fallout for a non-Host non-Judge', async () => {
-    const { orchestrator, store, clock, publisher } = await build();
+    const { orchestrator, store, publisher } = await build();
 
     await orchestrator.leaveRoom(ROOM_CODE, 'player-a');
 
@@ -211,7 +223,7 @@ describe('RoomOrchestrator.leaveRoom', () => {
         event: { event: 'room.player-left', payload: { id: 'player-a' } }
       }
     ]);
-    expect(clock.expiredRoundIds).toHaveLength(0);
+    expect((await store.rounds.findById('round-1'))?.status).toBe('PLAYING');
   });
 
   it('hands the Host to an active Player when the Host leaves mid-game', async () => {
@@ -248,12 +260,27 @@ describe('RoomOrchestrator.leaveRoom', () => {
   });
 
   it('aborts and rotates immediately when the departing Player is the Judge', async () => {
-    const { orchestrator, clock } = await build();
+    const { orchestrator, store, timers } = await build();
 
     await orchestrator.leaveRoom(ROOM_CODE, JUDGE_ID);
 
-    expect(clock.expiredRoundIds).toEqual(['round-1']);
-    expect(clock.gracedRoundIds).toHaveLength(0);
+    expect((await store.rounds.findById('round-1'))?.status).toBe('ABORTED');
+    expect((await store.rounds.find(ROOM_CODE, 2))?.judgeId).not.toBe(JUDGE_ID);
+    expect(timers.armed.has(graceKey('round-1'))).toBe(false);
+  });
+
+  it('aborts the Round when the Host leaves with no active heir', async () => {
+    const seed = gameSeed();
+    seed.players = [
+      makePlayer({ id: HOST_ID, isHost: true }),
+      makePlayer({ id: JUDGE_ID, isActive: false })
+    ];
+    const { orchestrator, store, publisher } = await build(seed);
+
+    await orchestrator.leaveRoom(ROOM_CODE, HOST_ID);
+
+    expect(publisher.published.at(-1)?.event.event).toBe('room.game-end');
+    expect((await store.rounds.findById('round-1'))?.status).toBe('ABORTED');
   });
 });
 
@@ -264,7 +291,7 @@ describe('RoomOrchestrator.markPresence', () => {
       makePlayer({ id: HOST_ID, isHost: true }),
       makePlayer({ id: JUDGE_ID, isActive: false })
     ];
-    const { orchestrator, store, clock, publisher } = await build(seed);
+    const { orchestrator, store, timers, publisher } = await build(seed);
 
     await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, true);
 
@@ -278,33 +305,46 @@ describe('RoomOrchestrator.markPresence', () => {
       }
     ]);
     expect((await findPlayer(store, JUDGE_ID))?.isActive).toBe(true);
-    expect(clock.gracedRoundIds).toHaveLength(0);
+    expect(timers.armed.size).toBe(0);
   });
 
   it('releases the held Round when the dropped Judge reconnects', async () => {
-    const { orchestrator, clock } = await build();
+    const { orchestrator, timers } = await build();
+    await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, false);
 
     await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, true);
 
-    expect(clock.returnedRoundIds).toEqual(['round-1']);
+    expect(timers.cleared).toEqual([graceKey('round-1')]);
+    expect(timers.armed.has(graceKey('round-1'))).toBe(false);
   });
 
-  it('does not touch the clock when a non-Judge reconnects', async () => {
-    const { orchestrator, clock } = await build();
+  it('does not touch the clocks when a non-Judge reconnects', async () => {
+    const { orchestrator, timers } = await build();
 
     await orchestrator.markPresence(ROOM_CODE, 'player-a', true);
 
-    expect(clock.returnedRoundIds).toHaveLength(0);
+    expect(timers.cleared).toEqual([]);
   });
 
-  it('arms the Judge grace timer on a drop of the current Judge', async () => {
-    const { orchestrator, store, clock } = await build();
+  it('arms the Judge grace on a drop of the current Judge, holding the Round', async () => {
+    const { orchestrator, store, timers } = await build();
 
     await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, false);
 
-    expect(clock.gracedRoundIds).toEqual(['round-1']);
-    expect(clock.expiredRoundIds).toHaveLength(0);
+    expect(timers.armed.get(graceKey('round-1'))).toBe(30);
+    expect((await store.rounds.findById('round-1'))?.status).toBe('PLAYING');
     expect((await findPlayer(store, JUDGE_ID))?.isActive).toBe(false);
+  });
+
+  it('moves to judging when the last Player owed a play drops', async () => {
+    const { orchestrator, store } = await build(
+      gameSeed({ playedCards: [{ roundId: 'round-1', playerId: HOST_ID, whiteCardIds: ['w-host'] }] })
+    );
+    await store.players.updatePlayerInRoom(ROOM_CODE, HOST_ID, { isReady: true });
+
+    await orchestrator.markPresence(ROOM_CODE, 'player-a', false);
+
+    expect((await store.rounds.findById('round-1'))?.status).toBe('JUDGING');
   });
 
   // Regression: a Host refresh in LOBBY closed the socket and ended the Room.
@@ -340,6 +380,34 @@ describe('RoomOrchestrator.markPresence', () => {
   });
 });
 
+describe('RoomOrchestrator.playerReady', () => {
+  it('toggles the ready flag in the LOBBY and broadcasts the Player update', async () => {
+    const { orchestrator, store, publisher } = await build(lobbySeed());
+
+    await orchestrator.playerReady(ROOM_CODE, 'player-a');
+
+    expect(publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer('player-a', { isReady: true })
+        }
+      }
+    ]);
+    expect((await findPlayer(store, 'player-a'))?.isReady).toBe(true);
+  });
+
+  it('rejects the toggle mid-game, where ready means "played this Round"', async () => {
+    const { orchestrator, publisher } = await build();
+
+    await expect(orchestrator.playerReady(ROOM_CODE, 'player-a')).rejects.toThrow(
+      BadRequestError
+    );
+    expect(publisher.published).toEqual([]);
+  });
+});
+
 describe('RoomOrchestrator.endRoom', () => {
   it('ends the game and broadcasts the final Ranking for the Host', async () => {
     const seed = gameSeed();
@@ -356,6 +424,19 @@ describe('RoomOrchestrator.endRoom', () => {
       { id: HOST_ID, username: HOST_ID, avatarUrl: null, score: 1 }
     ]);
     expect(publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: {
+          event: 'room.round-end',
+          payload: {
+            roundNumber: 1,
+            winner: null,
+            winnerId: null,
+            newScore: null,
+            reason: 'aborted'
+          }
+        }
+      },
       {
         channel: ROOM_CODE,
         event: { event: 'room.game-end', payload: ranking }

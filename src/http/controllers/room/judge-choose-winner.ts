@@ -1,10 +1,10 @@
 import type { App } from '@/app';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoundFlowFactory } from '@/services/round/RoundFlowFactory';
+import { RoundLifecycleFactory } from '@/services/round/RoundLifecycleFactory';
 import { z } from 'zod';
 
 export const judgeChooseWinner = async (app: App) => {
-  const roundFlow = RoundFlowFactory();
+  const rounds = RoundLifecycleFactory();
 
   app.register(ensureAuth).post(
     '/:roomCode/winner',
@@ -26,7 +26,7 @@ export const judgeChooseWinner = async (app: App) => {
       const { roomCode } = req.params;
       const { winnerPlayerId } = req.body;
 
-      await roundFlow.judgePick(roomCode, user.id, winnerPlayerId);
+      await rounds.judgePick(roomCode, user.id, winnerPlayerId);
 
       return { success: true };
     }
