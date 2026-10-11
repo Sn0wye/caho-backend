@@ -1,9 +1,8 @@
 import type { Room, WhiteCard } from '@/schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { FakeRoomRepository } from './room/RoomService.fakes';
-import { CardService } from './CardService';
-import { FakeCardRepository } from './CardService.fakes';
 import type { BlackCard } from '@/repositories/cards';
+import { InMemoryGameStore } from '@/repositories/game-store/InMemoryGameStore';
+import { CardService } from './CardService';
 
 const ROOM_CODE = 'ABC123';
 
@@ -37,23 +36,23 @@ function black(id: string): BlackCard {
   return { id, text: `black ${id}`, pick: 1, packId: 'base-pack' };
 }
 
-function buildService(args: {
+async function buildService(args: {
   room?: Room;
   whiteCards?: WhiteCard[];
   blackCards?: BlackCard[];
 }) {
-  const rooms = new FakeRoomRepository(args.room ?? makeRoom());
-  const cards = new FakeCardRepository(
-    args.whiteCards ?? [],
-    args.blackCards ?? []
-  );
-  const service = new CardService(ROOM_CODE, cards, rooms);
-  return { service, rooms };
+  const store = new InMemoryGameStore({
+    whiteCards: args.whiteCards ?? [],
+    blackCards: args.blackCards ?? []
+  });
+  await store.rooms.create(args.room ?? makeRoom());
+  const service = new CardService(ROOM_CODE, store.cards, store.rooms);
+  return { service, rooms: store.rooms };
 }
 
 describe('CardService.getNewWhiteCards', () => {
   it('draws from the card repository, excluding the Room picked cards', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ pickedWhiteCards: ['w1'] }),
       whiteCards: [white('w1'), white('w2'), white('w3')]
     });
@@ -64,7 +63,7 @@ describe('CardService.getNewWhiteCards', () => {
   });
 
   it('records drawn ids so the same card never repeats within a Room', async () => {
-    const { service, rooms } = buildService({
+    const { service, rooms } = await buildService({
       whiteCards: [white('w1'), white('w2'), white('w3'), white('w4')]
     });
 
@@ -80,7 +79,7 @@ describe('CardService.getNewWhiteCards', () => {
 
 describe('CardService.getNewWhiteCards when the pool runs dry', () => {
   it('tops up from a restarted ledger instead of dealing short', async () => {
-    const { service, rooms } = buildService({
+    const { service, rooms } = await buildService({
       room: makeRoom({ pickedWhiteCards: ['w1', 'w2'] }),
       whiteCards: [white('w1'), white('w2'), white('w3')]
     });
@@ -95,7 +94,7 @@ describe('CardService.getNewWhiteCards when the pool runs dry', () => {
 
 describe('CardService.getNewBlackCard', () => {
   it('draws a Black Card excluding picked ones and sets it as current', async () => {
-    const { service, rooms } = buildService({
+    const { service, rooms } = await buildService({
       room: makeRoom({ pickedBlackCards: ['b1'] }),
       blackCards: [black('b1'), black('b2')]
     });
@@ -109,7 +108,7 @@ describe('CardService.getNewBlackCard', () => {
   });
 
   it('reshuffles the discards, skipping the current card, once every card was shown', async () => {
-    const { service, rooms } = buildService({
+    const { service, rooms } = await buildService({
       room: makeRoom({ pickedBlackCards: ['b1', 'b2'], currentBlackCardId: 'b1' }),
       blackCards: [black('b1'), black('b2')]
     });
@@ -122,7 +121,7 @@ describe('CardService.getNewBlackCard', () => {
   });
 
   it('throws with the Room code when the pack has no Black Card at all', async () => {
-    const { service } = buildService({ blackCards: [] });
+    const { service } = await buildService({ blackCards: [] });
 
     await expect(service.getNewBlackCard()).rejects.toThrow(ROOM_CODE);
   });
@@ -130,7 +129,7 @@ describe('CardService.getNewBlackCard', () => {
 
 describe('CardService lookups and reset', () => {
   it('finds cards by id through the repository', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       whiteCards: [white('w1')],
       blackCards: [black('b1')]
     });
@@ -141,7 +140,7 @@ describe('CardService lookups and reset', () => {
   });
 
   it('resetDeck clears both picked-card ledgers on the Room', async () => {
-    const { service, rooms } = buildService({
+    const { service, rooms } = await buildService({
       room: makeRoom({ pickedWhiteCards: ['w1'], pickedBlackCards: ['b1'] })
     });
 

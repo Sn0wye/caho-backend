@@ -42,3 +42,49 @@ jobs:
 
       - name: Type check
         run: pnpm typecheck
+
+  # The game-store contract against a real Postgres (issue #24): verifies the
+  # idempotent phase claim and expired-Round sweep SQL that ADR-0003 relies on.
+  # Credentials match .env.test.
+  db-contract:
+    name: Game store contract (Postgres)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: caho
+          POSTGRES_PASSWORD: caho
+          POSTGRES_DB: caho_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U caho -d caho_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.15.0"
+          package-manager-cache: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Contract tests
+        env:
+          RUN_DB_MIGRATIONS: "true"
+        run: pnpm exec dotenv -e .env.test -- vitest run src/repositories/game-store

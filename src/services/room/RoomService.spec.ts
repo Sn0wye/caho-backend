@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ROOM_CODE,
   buildService,
-  makePlayedCard,
+  makePlayedCards,
   makePlayer,
   makeRoom,
   makeRound
@@ -19,11 +19,11 @@ describe('RoomService.processJudgeChooseWinner', () => {
   });
 
   it('awards one point to the winning Player', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ maxPoints: 5 }),
       players: [judge, winner],
       rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCard('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
 
     const result = await service.processJudgeChooseWinner({
@@ -36,11 +36,11 @@ describe('RoomService.processJudgeChooseWinner', () => {
   });
 
   it('keeps the game going when the winner is below maxPoints', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ maxPoints: 5 }),
       players: [judge, makePlayer({ id: 'player-winner', score: 0 })],
       rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCard('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
 
     const result = await service.processJudgeChooseWinner({
@@ -54,11 +54,11 @@ describe('RoomService.processJudgeChooseWinner', () => {
   });
 
   it('ends the game when the winner reaches maxPoints', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ maxPoints: 2 }),
       players: [judge, makePlayer({ id: 'player-winner', score: 1 })],
       rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCard('player-winner')]
+      playedCards: [makePlayedCards('player-winner')]
     });
 
     const result = await service.processJudgeChooseWinner({
@@ -79,14 +79,13 @@ describe('RoomService.processJudgeChooseWinner', () => {
 
 describe('RoomService.endGame', () => {
   it('marks the Room FINISHED and returns the Ranking', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ status: 'IN_PROGRESS' }),
       players: [
         makePlayer({ id: 'player-a', score: 3 }),
         makePlayer({ id: 'player-b', score: 5 })
       ],
       rounds: [],
-      playedCards: []
     });
 
     const ranking = await service.endGame(ROOM_CODE);
@@ -101,11 +100,10 @@ describe('RoomService.dealInitialHands', () => {
   it('deals 10 White Cards to every Player, including the Judge', async () => {
     const judge = makePlayer({ id: 'player-judge', isJudge: true });
     const other = makePlayer({ id: 'player-other' });
-    const { service, fakes } = buildService({
+    const { service, store } = await buildService({
       room: makeRoom(),
       players: [judge, other],
       rounds: [],
-      playedCards: []
     });
 
     const dealt = await service.dealInitialHands({
@@ -118,7 +116,7 @@ describe('RoomService.dealInitialHands', () => {
       'player-other'
     ]);
     for (const playerId of ['player-judge', 'player-other']) {
-      const player = await fakes.players.getPlayerFromRoom(ROOM_CODE, playerId);
+      const player = await store.players.getPlayerFromRoom(ROOM_CODE, playerId);
       expect(player?.cardIds).toHaveLength(10);
     }
   });
@@ -128,17 +126,16 @@ describe('RoomService.playCards', () => {
   it('refills the Hand back to 10 after a Player plays', async () => {
     const hand = Array.from({ length: 10 }, (_, i) => `hand-${i}`);
     const played = ['hand-0', 'hand-1', 'hand-2'];
-    const { service, fakes } = buildService({
+    const { service, store } = await buildService({
       room: makeRoom(),
       players: [makePlayer({ id: 'player-hand', cardIds: hand })],
       rounds: [makeRound()],
-      playedCards: [],
       blackCards: [{ id: 'black-1', text: 'pick three', pick: 3, packId: 'p' }]
     });
 
     await service.playCards(ROOM_CODE, 'player-hand', played);
 
-    const player = await fakes.players.getPlayerFromRoom(
+    const player = await store.players.getPlayerFromRoom(
       ROOM_CODE,
       'player-hand'
     );
@@ -151,11 +148,10 @@ describe('RoomService.playCards', () => {
 
 describe('RoomService.setPlayerActive', () => {
   it('marks a Player inactive on drop while keeping them in the Room', async () => {
-    const { service, fakes } = buildService({
+    const { service, store } = await buildService({
       room: makeRoom(),
       players: [makePlayer({ id: 'player-dropped' })],
       rounds: [],
-      playedCards: []
     });
 
     const updated = await service.setPlayerActive(
@@ -165,7 +161,7 @@ describe('RoomService.setPlayerActive', () => {
     );
 
     expect(updated.isActive).toBe(false);
-    const stillThere = await fakes.players.getPlayerFromRoom(
+    const stillThere = await store.players.getPlayerFromRoom(
       ROOM_CODE,
       'player-dropped'
     );
@@ -173,11 +169,10 @@ describe('RoomService.setPlayerActive', () => {
   });
 
   it('marks a Player active again on reconnect', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom(),
       players: [makePlayer({ id: 'player-back', isActive: false })],
       rounds: [],
-      playedCards: []
     });
 
     const updated = await service.setPlayerActive(
@@ -190,16 +185,15 @@ describe('RoomService.setPlayerActive', () => {
   });
 
   it('keeps an Inactive Player in the Ranking with their score intact', async () => {
-    const { service, fakes } = buildService({
+    const { service, store } = await buildService({
       room: makeRoom(),
       players: [makePlayer({ id: 'player-dropped', score: 3 })],
       rounds: [],
-      playedCards: []
     });
 
     await service.setPlayerActive(ROOM_CODE, 'player-dropped', false);
 
-    const ranking = await fakes.ranking.getRankingByRoomCode(ROOM_CODE);
+    const ranking = await store.ranking.getRankingByRoomCode(ROOM_CODE);
     expect(ranking).toContainEqual(
       expect.objectContaining({ id: 'player-dropped', score: 3 })
     );
@@ -208,14 +202,13 @@ describe('RoomService.setPlayerActive', () => {
 
 describe('RoomService.handleHostLoss', () => {
   it('ends the Room when the Host is lost while in the LOBBY', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ status: 'LOBBY', hostId: 'host' }),
       players: [
         makePlayer({ id: 'host', isHost: true }),
         makePlayer({ id: 'guest' })
       ],
       rounds: [],
-      playedCards: []
     });
 
     const outcome = await service.handleHostLoss(ROOM_CODE, 'host');
@@ -226,14 +219,13 @@ describe('RoomService.handleHostLoss', () => {
   });
 
   it('reassigns the Host to an active Player while IN_PROGRESS', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
       players: [
         makePlayer({ id: 'host', isHost: true }),
         makePlayer({ id: 'heir', isActive: true })
       ],
       rounds: [],
-      playedCards: []
     });
 
     const outcome = await service.handleHostLoss(ROOM_CODE, 'host');
@@ -248,14 +240,13 @@ describe('RoomService.handleHostLoss', () => {
   });
 
   it('ends the Room when the Host is lost IN_PROGRESS and no active Players remain', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
       players: [
         makePlayer({ id: 'host', isHost: true, isActive: false }),
         makePlayer({ id: 'dropped', isActive: false })
       ],
       rounds: [],
-      playedCards: []
     });
 
     const outcome = await service.handleHostLoss(ROOM_CODE, 'host');
@@ -266,7 +257,7 @@ describe('RoomService.handleHostLoss', () => {
   });
 
   it('leaves a dropped ex-Host as an ordinary active Player on reconnect', async () => {
-    const { service, fakes } = buildService({
+    const { service, store } = await buildService({
       room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
       players: [
         // Drop marks the ex-Host inactive but keeps the row (its Host flag still set).
@@ -274,7 +265,6 @@ describe('RoomService.handleHostLoss', () => {
         makePlayer({ id: 'heir', isActive: true })
       ],
       rounds: [],
-      playedCards: []
     });
 
     await service.handleHostLoss(ROOM_CODE, 'host');
@@ -282,19 +272,18 @@ describe('RoomService.handleHostLoss', () => {
 
     expect(reconnected.isActive).toBe(true);
     expect(reconnected.isHost).toBe(false);
-    const room = await fakes.room.getRoomByCode(ROOM_CODE);
+    const room = await store.rooms.getRoomByCode(ROOM_CODE);
     expect(room?.hostId).toBe('heir');
   });
 
   it('does nothing when the departing Player is not the Host', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ status: 'IN_PROGRESS', hostId: 'host' }),
       players: [
         makePlayer({ id: 'host', isHost: true }),
         makePlayer({ id: 'guest' })
       ],
       rounds: [],
-      playedCards: []
     });
 
     const outcome = await service.handleHostLoss(ROOM_CODE, 'guest');
@@ -308,11 +297,10 @@ describe('RoomService.handleHostLoss', () => {
 
 describe('RoomService.getActiveRound', () => {
   it('returns the Round matching the Room current round number', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ round: 2 }),
       players: [makePlayer({ id: 'player-judge', isJudge: true })],
       rounds: [makeRound({ roundNumber: 1 }), makeRound({ id: 'round-2', roundNumber: 2 })],
-      playedCards: []
     });
 
     const round = await service.getActiveRound(ROOM_CODE);
@@ -321,11 +309,10 @@ describe('RoomService.getActiveRound', () => {
   });
 
   it('returns null when no Round matches the current round number', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom({ round: 9 }),
       players: [makePlayer({ id: 'player-judge', isJudge: true })],
       rounds: [makeRound({ roundNumber: 1 })],
-      playedCards: []
     });
 
     expect(await service.getActiveRound(ROOM_CODE)).toBeNull();
@@ -334,7 +321,7 @@ describe('RoomService.getActiveRound', () => {
 
 describe('RoomService.allActivePlayersPlayed', () => {
   it('ignores Inactive Players when all active Players have played', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom(),
       players: [
         makePlayer({ id: 'player-judge', isJudge: true }),
@@ -342,21 +329,19 @@ describe('RoomService.allActivePlayersPlayed', () => {
         makePlayer({ id: 'player-dropped', isActive: false, isReady: false })
       ],
       rounds: [],
-      playedCards: []
     });
 
     expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(true);
   });
 
   it('is false while an active non-Judge Player has not played', async () => {
-    const { service } = buildService({
+    const { service } = await buildService({
       room: makeRoom(),
       players: [
         makePlayer({ id: 'player-judge', isJudge: true }),
         makePlayer({ id: 'player-active', isReady: false })
       ],
       rounds: [],
-      playedCards: []
     });
 
     expect(await service.allActivePlayersPlayed(ROOM_CODE)).toBe(false);

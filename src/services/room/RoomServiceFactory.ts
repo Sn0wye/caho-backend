@@ -1,21 +1,14 @@
-import { RankingRepositoryFactory } from '@/repositories/ranking';
-import { RoomRepositoryFactory } from '@/repositories/room';
-import { RoomPlayersRepositoryFactory } from '@/repositories/room-players';
+import { PostgresGameStoreFactory } from '@/repositories/game-store/PostgresGameStore';
+import { BlackCardDeck } from './BlackCardDeck';
 import type { IRoomService } from './IRoomService';
 import { RoomService } from './RoomService';
-import { RoundRepositoryFactory } from '@/repositories/round';
-import { RoundPlayedCardsRepositoryFactory } from '@/repositories/round-played-cards';
 import { WhiteCardDealer } from './WhiteCardDealer';
-import { BlackCardDeck } from './BlackCardDeck';
 
 export function RoomServiceFactory(): IRoomService {
+  const store = PostgresGameStoreFactory();
   return new RoomService(
-    RoomRepositoryFactory(),
-    RankingRepositoryFactory(),
-    RoomPlayersRepositoryFactory(),
-    RoundRepositoryFactory(),
-    RoundPlayedCardsRepositoryFactory(),
-    new WhiteCardDealer(),
-    new BlackCardDeck()
+    store,
+    new WhiteCardDealer(store),
+    new BlackCardDeck(store)
   );
 }

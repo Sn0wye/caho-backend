@@ -6,8 +6,9 @@ import type { GameStart, HostLossOutcome } from './IRoomService';
 // The slice of IRoomService that RoomOrchestrator needs (ISP): membership
 // (join/leave), the end-game projection, presence toggling, and the
 // status-dependent Host/Judge departure reads. Carved off the god IRoomService so
-// the orchestrator depends only on what it uses and its fake stays small.
-// RoomService implements the full interface, so it satisfies this. ADR-0004.
+// the orchestrator depends only on what it uses. RoomService implements the
+// full interface, so it satisfies this; specs drive it over InMemoryGameStore
+// (issue #24). ADR-0004.
 export interface IRoomOrchestratorService {
   getRoom(roomCode: string): Promise<Room>;
   joinRoom(input: JoinRoomDTO): Promise<Room>;

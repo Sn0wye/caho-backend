@@ -1,37 +1,28 @@
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
-import type { Round, RoundPlayedCard } from '@/schemas';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { FakeRoundPlayedCardsRepository } from '../room/RoomService.fakes';
+import { InMemoryGameStore } from '@/repositories/game-store/InMemoryGameStore';
+import type { InMemoryRoundRepository } from '@/repositories/game-store/in-memory/InMemoryRoundRepository';
 import {
-  FakeRoundEventPublisher,
+  ROOM_CODE,
+  makePlayer,
+  makeRoom,
+  makeRound,
+  makeWhiteCard,
+  seedGame
+} from '@/repositories/game-store/gameStore.fixtures';
+import type { Round, RoundPlayedCard } from '@/schemas';
+import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
   FakeRoundRotator,
-  FakeRoundTimerRepository,
   FakeRoundTimerStore
 } from './RoundTimekeeper.fakes';
 import { RoundTimekeeper } from './RoundTimekeeper';
 import { judgeKey, parseDeadlineKey, playKey } from './deadlineKeys';
 
-const ROOM_CODE = 'ABC123';
 const ROUND_ID = 'round-1';
 
-function makeRound(overrides: Partial<Round> = {}): Round {
-  return {
-    id: ROUND_ID,
-    roomCode: ROOM_CODE,
-    roundNumber: 1,
-    blackCardId: 'black-1',
-    judgeId: 'player-judge',
-    roundWinnerId: null,
-    status: 'PLAYING',
-    playDeadline: null,
-    judgeDeadline: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides
-  };
-}
-
+// A value handed straight to advanceToJudging (not seeded into the store).
 function makePlayedCard(playerId: string): RoundPlayedCard {
   return {
     id: `played-${playerId}`,
@@ -49,30 +40,39 @@ function makePlayedCard(playerId: string): RoundPlayedCard {
 
 type Fakes = {
   store: FakeRoundTimerStore;
-  rounds: FakeRoundTimerRepository;
-  playedCards: FakeRoundPlayedCardsRepository;
+  rounds: InMemoryRoundRepository;
   rotator: FakeRoundRotator;
-  publisher: FakeRoundEventPublisher;
+  publisher: FakeGameEventPublisher;
 };
 
-function buildTimekeeper(args: {
+// Rounds live in the shared InMemoryGameStore, so the claim and the play count
+// are the production rules. `playedBy` seeds one real play per Player id.
+async function buildTimekeeper(args: {
   rounds: Round[];
-  playedCards?: RoundPlayedCard[];
-}): { timekeeper: RoundTimekeeper; fakes: Fakes; output: FakeConsoleOutput } {
+  playedBy?: string[];
+}): Promise<{ timekeeper: RoundTimekeeper; fakes: Fakes; output: FakeConsoleOutput }> {
+  const playedBy = args.playedBy ?? [];
+  const game = new InMemoryGameStore({ whiteCards: [makeWhiteCard('w1')], blackCards: [] });
+  await seedGame(game, {
+    room: makeRoom(),
+    players: playedBy.map(id => makePlayer({ id })),
+    rounds: args.rounds,
+    playedCards: playedBy.map(playerId => ({ roundId: ROUND_ID, playerId, whiteCardIds: ['w1'] }))
+  });
+
   const fakes: Fakes = {
     store: new FakeRoundTimerStore(),
-    rounds: new FakeRoundTimerRepository(args.rounds),
-    playedCards: new FakeRoundPlayedCardsRepository(args.playedCards ?? []),
+    rounds: game.rounds,
     rotator: new FakeRoundRotator(),
-    publisher: new FakeRoundEventPublisher()
+    publisher: new FakeGameEventPublisher()
   };
 
   const output = new FakeConsoleOutput();
   const { logger } = buildLogger({ consoleOutput: output });
   const timekeeper = new RoundTimekeeper(
     fakes.store,
-    fakes.rounds,
-    fakes.playedCards,
+    game.rounds,
+    game.playedCards,
     fakes.rotator,
     fakes.publisher,
     { playWindowSeconds: 60, judgeGraceSeconds: 30, judgeWindowSeconds: 90 },
@@ -84,7 +84,7 @@ function buildTimekeeper(args: {
 
 describe('RoundTimekeeper.armPlayDeadline', () => {
   it('arms the Redis play key with the configured TTL', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({ rounds: [makeRound()] });
+    const { timekeeper, fakes } = await buildTimekeeper({ rounds: [makeRound()] });
 
     await timekeeper.armPlayDeadline(ROUND_ID);
 
@@ -92,7 +92,7 @@ describe('RoundTimekeeper.armPlayDeadline', () => {
   });
 
   it('persists the play deadline on the Round as a Postgres backstop', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({ rounds: [makeRound()] });
+    const { timekeeper, fakes } = await buildTimekeeper({ rounds: [makeRound()] });
 
     const before = Date.now();
     await timekeeper.armPlayDeadline(ROUND_ID);
@@ -105,9 +105,9 @@ describe('RoundTimekeeper.armPlayDeadline', () => {
 
 describe('RoundTimekeeper.onPlayExpired', () => {
   it('moves to JUDGING when at least one Player played, skipping the rest', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })],
-      playedCards: [makePlayedCard('player-a')]
+      playedBy: ['player-a']
     });
 
     await timekeeper.onPlayExpired(ROUND_ID);
@@ -119,9 +119,9 @@ describe('RoundTimekeeper.onPlayExpired', () => {
   });
 
   it('aborts the Round and rotates the Judge when nobody played', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING', roundNumber: 4 })],
-      playedCards: []
+      playedBy: []
     });
 
     await timekeeper.onPlayExpired(ROUND_ID);
@@ -136,7 +136,7 @@ describe('RoundTimekeeper.onPlayExpired', () => {
 
 describe('RoundTimekeeper.advanceToJudging', () => {
   it('claims PLAYING->JUDGING and broadcasts time-to-judge once with the plays', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })]
     });
     const plays = [makePlayedCard('player-a')];
@@ -158,7 +158,7 @@ describe('RoundTimekeeper.advanceToJudging', () => {
   });
 
   it('is idempotent: a second caller wins no claim and does not re-broadcast', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })]
     });
     const round = makeRound();
@@ -175,7 +175,7 @@ describe('RoundTimekeeper.advanceToJudging', () => {
 
 describe('RoundTimekeeper.armJudgeGrace', () => {
   it('holds the Round and arms the judge-grace key without changing phase', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })]
     });
 
@@ -192,7 +192,7 @@ describe('RoundTimekeeper.armJudgeGrace', () => {
 
 describe('RoundTimekeeper.onJudgeExpired', () => {
   it('aborts the Round and rotates the Judge when grace lapses', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'JUDGING', roundNumber: 7 })]
     });
 
@@ -208,9 +208,9 @@ describe('RoundTimekeeper.onJudgeExpired', () => {
 
 describe('RoundTimekeeper idempotency', () => {
   it('rotates only once when a play-expiry event is replayed', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })],
-      playedCards: []
+      playedBy: []
     });
 
     await timekeeper.onPlayExpired(ROUND_ID);
@@ -220,7 +220,7 @@ describe('RoundTimekeeper idempotency', () => {
   });
 
   it('rotates only once when a judge-expiry event is replayed', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'JUDGING' })]
     });
 
@@ -234,9 +234,9 @@ describe('RoundTimekeeper idempotency', () => {
 describe('RoundTimekeeper.reconcile', () => {
   it('advances a Round whose play deadline passed while unsubscribed', async () => {
     const past = new Date(Date.now() - 60_000);
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING', playDeadline: past, roundNumber: 2 })],
-      playedCards: []
+      playedBy: []
     });
 
     await timekeeper.reconcile();
@@ -250,9 +250,9 @@ describe('RoundTimekeeper.reconcile', () => {
 
   it('leaves a Round whose deadline has not passed untouched', async () => {
     const future = new Date(Date.now() + 60_000);
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING', playDeadline: future })],
-      playedCards: []
+      playedBy: []
     });
 
     await timekeeper.reconcile();
@@ -265,9 +265,9 @@ describe('RoundTimekeeper.reconcile', () => {
 
 describe('RoundTimekeeper.onExpired', () => {
   it('routes a play key to the play-expiry transition', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })],
-      playedCards: [makePlayedCard('player-a')]
+      playedBy: ['player-a']
     });
 
     await timekeeper.onExpired(playKey(ROUND_ID));
@@ -276,7 +276,7 @@ describe('RoundTimekeeper.onExpired', () => {
   });
 
   it('routes a judge key to the judge-expiry transition', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'JUDGING' })]
     });
 
@@ -286,7 +286,7 @@ describe('RoundTimekeeper.onExpired', () => {
   });
 
   it('ignores an unrelated expired key', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })]
     });
 
@@ -299,9 +299,9 @@ describe('RoundTimekeeper.onExpired', () => {
 
 describe('RoundTimekeeper broadcasts a timer-driven advance', () => {
   it('publishes room.time-to-judge once when the play window closes with plays', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })],
-      playedCards: [makePlayedCard('player-a')]
+      playedBy: ['player-a']
     });
 
     await timekeeper.onPlayExpired(ROUND_ID);
@@ -315,7 +315,7 @@ describe('RoundTimekeeper broadcasts a timer-driven advance', () => {
   });
 
   it('publishes room.round-start once when an aborted Round rotates', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'JUDGING' })]
     });
 
@@ -330,7 +330,7 @@ describe('RoundTimekeeper broadcasts a timer-driven advance', () => {
   });
 
   it('announces the aborted Round with no winner before the next starts', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'JUDGING', roundNumber: 7 })]
     });
 
@@ -376,9 +376,9 @@ describe('parseDeadlineKey', () => {
 
 describe('RoundTimekeeper keeps every Round on a clock', () => {
   it('arms the play deadline of the Round opened by an abort', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING', roundNumber: 3 })],
-      playedCards: []
+      playedBy: []
     });
 
     await timekeeper.onPlayExpired(ROUND_ID);
@@ -387,7 +387,7 @@ describe('RoundTimekeeper keeps every Round on a clock', () => {
   });
 
   it('arms a judging deadline when the Round reaches judging', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })]
     });
 
@@ -400,7 +400,7 @@ describe('RoundTimekeeper keeps every Round on a clock', () => {
 
 describe('RoundTimekeeper.onJudgeReturned', () => {
   it('cancels the drop grace while playing so the Round is not aborted', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'PLAYING' })]
     });
     await timekeeper.armJudgeGrace(ROUND_ID);
@@ -412,7 +412,7 @@ describe('RoundTimekeeper.onJudgeReturned', () => {
   });
 
   it('restores a full judging window while judging', async () => {
-    const { timekeeper, fakes } = buildTimekeeper({
+    const { timekeeper, fakes } = await buildTimekeeper({
       rounds: [makeRound({ status: 'JUDGING' })]
     });
     await timekeeper.armJudgeGrace(ROUND_ID);
@@ -426,7 +426,7 @@ describe('RoundTimekeeper.onJudgeReturned', () => {
 
 describe('Round timer logging', () => {
   it('logs only the winning judging transition without private cards', async () => {
-    const { timekeeper, output } = buildTimekeeper({ rounds: [makeRound()] });
+    const { timekeeper, output } = await buildTimekeeper({ rounds: [makeRound()] });
     await timekeeper.advanceToJudging(makeRound(), [makePlayedCard('player-a')]);
     await timekeeper.advanceToJudging(makeRound(), [makePlayedCard('player-a')]);
     expect(output.lines.map(line => JSON.parse(line).event)).toEqual(['round.judging_started']);
@@ -435,7 +435,7 @@ describe('Round timer logging', () => {
   });
 
   it('records reconciliation counts and an idempotent abort', async () => {
-    const { timekeeper, output } = buildTimekeeper({ rounds: [makeRound({ playDeadline: new Date(0) })] });
+    const { timekeeper, output } = await buildTimekeeper({ rounds: [makeRound({ playDeadline: new Date(0) })] });
     await timekeeper.reconcile();
     await timekeeper.onPlayExpired(ROUND_ID);
     expect(output.lines.map(line => JSON.parse(line).event)).toEqual([

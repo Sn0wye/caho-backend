@@ -1,378 +1,419 @@
+import { BadRequestError } from '@/errors';
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
-import type { JoinRoomDTO } from '@/dto/JoinRoom';
-import { BadRequestError } from '@/errors';
-import type { Player, Ranking, Room, RoomPlayer, Round } from '@/schemas';
-import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
-import type { HostLossOutcome } from './IRoomService';
+import type { InMemoryGameStore } from '@/repositories/game-store/InMemoryGameStore';
 import {
-  FakeJudgeClock,
-  FakeRoomOrchestratorService,
-  type RoomOrchestratorState
-} from './RoomOrchestrator.fakes';
-import { RoomOrchestrator } from './RoomOrchestrator';
+  type GameSeed,
+  makeBlackCard
+} from '@/repositories/game-store/gameStore.fixtures';
+import { FakeGameEventPublisher } from '@/services/IGameEventPublisher.fakes';
 import { describe, expect, it } from 'vitest';
+import { RoomOrchestrator } from './RoomOrchestrator';
+import { FakeJudgeClock } from './RoomOrchestrator.fakes';
+import {
+  ROOM_CODE,
+  buildService,
+  findPlayer,
+  makePlayer,
+  makeRoom,
+  makeRoomPlayer,
+  makeRound
+} from './RoomService.fixtures';
 
-const ROOM_CODE = 'ABC123';
+// RoomOrchestrator over the real RoomService on one InMemoryGameStore. Only the
+// Judge clock (RoundTimekeeper's slice, covered by its own spec) and the
+// publisher are faked, so membership, Host and Judge fallout come from the
+// rules themselves rather than scripted outcomes. See issue #24.
+
 const HOST_ID = 'host';
 const JUDGE_ID = 'player-judge';
 
-function makePlayer(overrides: Partial<Player> = {}): Player {
-  return {
-    id: 'player-a',
-    username: 'player-a',
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isJudge: false,
-    isActive: true,
-    score: 0,
-    cardIds: [],
-    ...overrides
-  };
-}
-
-// What a room.* player payload carries after the private Hand (cardIds) and the
-// derived isJudge are stripped from a Player. ADR-0005.
-function makeRoomPlayer(overrides: Partial<RoomPlayer> = {}): RoomPlayer {
-  return {
-    id: 'player-a',
-    username: 'player-a',
-    avatarUrl: null,
-    isHost: false,
-    isReady: false,
-    isActive: true,
-    score: 0,
-    ...overrides
-  };
-}
-
-function makeRoom(overrides: Partial<Room> = {}): Room {
-  return {
-    id: 'room-1',
-    code: ROOM_CODE,
-    maxPlayers: 8,
-    maxPoints: 5,
-    status: 'IN_PROGRESS',
-    hostId: HOST_ID,
-    password: null,
-    isPublic: true,
-    prevJudgeId: null,
-    judgeId: JUDGE_ID,
-    round: 2,
-    pickedWhiteCards: [],
-    pickedBlackCards: [],
-    currentBlackCardId: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides
-  };
-}
-
-function makeRound(): Round {
-  return {
-    id: 'round-2',
-    roomCode: ROOM_CODE,
-    roundNumber: 2,
-    blackCardId: 'black-1',
-    judgeId: JUDGE_ID,
-    roundWinnerId: null,
-    status: 'PLAYING',
-    playDeadline: null,
-    judgeDeadline: null,
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
-}
-
-const NOT_HOST: HostLossOutcome = { kind: 'not-host' };
-
 type Harness = {
-  output: FakeConsoleOutput;
   orchestrator: RoomOrchestrator;
-  rooms: FakeRoomOrchestratorService;
+  store: InMemoryGameStore;
   clock: FakeJudgeClock;
   publisher: FakeGameEventPublisher;
+  output: FakeConsoleOutput;
 };
 
-function build(state: Partial<RoomOrchestratorState>): Harness {
-  const rooms = new FakeRoomOrchestratorService(state);
+// Host, Judge and one more Player, mid-game in Round 1.
+function gameSeed(overrides: Partial<GameSeed> = {}): GameSeed {
+  return {
+    room: makeRoom({ hostId: HOST_ID, judgeId: JUDGE_ID }),
+    players: [
+      makePlayer({ id: HOST_ID, isHost: true }),
+      makePlayer({ id: JUDGE_ID }),
+      makePlayer({ id: 'player-a' })
+    ],
+    rounds: [makeRound()],
+    ...overrides
+  };
+}
+
+function lobbySeed(overrides: Partial<GameSeed> = {}): GameSeed {
+  return gameSeed({
+    room: makeRoom({
+      status: 'LOBBY',
+      round: 0,
+      hostId: HOST_ID,
+      judgeId: null
+    }),
+    rounds: [],
+    ...overrides
+  });
+}
+
+async function build(seed: GameSeed = gameSeed()): Promise<Harness> {
+  const { service, store } = await buildService(seed);
   const clock = new FakeJudgeClock();
   const publisher = new FakeGameEventPublisher();
   const output = new FakeConsoleOutput();
   const { logger } = buildLogger({ consoleOutput: output });
-  return {
-    output,
-    orchestrator: new RoomOrchestrator(rooms, clock, publisher, logger),
-    rooms,
-    clock,
-    publisher
-  };
+  const orchestrator = new RoomOrchestrator(service, clock, publisher, logger);
+  return { orchestrator, store, clock, publisher, output };
 }
 
 describe('RoomOrchestrator.joinRoom', () => {
   it('adds the Player and announces the join', async () => {
-    const room = makeRoom({ status: 'LOBBY' });
-    const { orchestrator, rooms, publisher } = build({ room });
-    const input: JoinRoomDTO = {
+    const { orchestrator, store, publisher } = await build(lobbySeed());
+
+    const room = await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: null,
-      player: makePlayer()
-    };
+      player: makePlayer({ id: 'newcomer' })
+    });
 
-    const result = await orchestrator.joinRoom(input);
-
-    expect(result).toBe(room);
-    expect(rooms.joined).toEqual([input]);
+    expect(room.code).toBe(ROOM_CODE);
+    expect(await findPlayer(store, 'newcomer'))?.toBeDefined();
     expect(publisher.published).toEqual([
-      {
-        channel: ROOM_CODE,
-        event: { event: 'room.player-joined', payload: makeRoomPlayer() }
-      }
-    ]);
-  });
-});
-
-describe('RoomOrchestrator.joinRoom mid-game', () => {
-  it('deals a late joiner a Hand on their private channel', async () => {
-    const hand = [{ id: 'w1', text: 'white', packId: 'p' }];
-    const { orchestrator, rooms, publisher } = build({
-      room: makeRoom({ status: 'IN_PROGRESS' }),
-      dealtHand: hand
-    });
-
-    await orchestrator.joinRoom({ roomCode: ROOM_CODE, password: null, player: makePlayer() });
-
-    expect(rooms.dealHandCalls).toEqual([
-      { roomCode: ROOM_CODE, playerId: 'player-a', count: 10 }
-    ]);
-    expect(publisher.published.at(-1)).toEqual({
-      channel: 'player-a',
-      event: { event: 'player.cards-drawn', payload: hand }
-    });
-  });
-});
-
-describe('RoomOrchestrator.startRoom', () => {
-  it('broadcasts the sanitized start, sends each Hand privately, arms Round 1 and announces it', async () => {
-    const blackCard = { id: 'b1', text: 'black', pick: 1, packId: 'p' };
-    const hand = [{ id: 'w1', text: 'white', packId: 'p' }];
-    const host = makePlayer({ id: HOST_ID, isHost: true });
-    const { orchestrator, clock, publisher } = build({
-      gameStart: {
-        room: makeRoom({ password: 'secret', round: 1 }),
-        players: [host],
-        round: { ...makeRound(), id: 'round-1', roundNumber: 1 },
-        blackCard,
-        hands: [{ playerId: HOST_ID, cards: hand }]
-      }
-    });
-
-    await orchestrator.startRoom(ROOM_CODE, HOST_ID);
-
-    const [started, cards, roundStart] = publisher.published;
-    expect(started.event.event).toBe('room.started');
-    expect(JSON.stringify(started.event.payload)).not.toContain('secret');
-    expect(cards).toEqual({
-      channel: HOST_ID,
-      event: { event: 'player.cards-drawn', payload: hand }
-    });
-    expect(clock.armedPlayRoundIds).toEqual(['round-1']);
-    expect(roundStart.event).toEqual({
-      event: 'room.round-start',
-      payload: { roundNumber: 1, judgeId: JUDGE_ID, blackCard }
-    });
-  });
-});
-
-describe('RoomOrchestrator.markPresence reconnect', () => {
-  it('releases the held Round when the dropped Judge reconnects', async () => {
-    const { orchestrator, clock } = build({
-      room: makeRoom(),
-      presencePlayer: makePlayer({ id: JUDGE_ID }),
-      activeRound: makeRound()
-    });
-
-    await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, true);
-
-    expect(clock.returnedRoundIds).toEqual(['round-2']);
-  });
-
-  it('does not touch the clock when a non-Judge reconnects', async () => {
-    const { orchestrator, clock } = build({
-      room: makeRoom(),
-      presencePlayer: makePlayer(),
-      activeRound: makeRound()
-    });
-
-    await orchestrator.markPresence(ROOM_CODE, 'player-a', true);
-
-    expect(clock.returnedRoundIds).toHaveLength(0);
-  });
-});
-
-describe('RoomOrchestrator.leaveRoom', () => {
-  it('removes the Player and announces the leave with no fallout for a non-Host non-Judge', async () => {
-    const { orchestrator, rooms, clock, publisher } = build({
-      room: makeRoom(),
-      hostLoss: NOT_HOST
-    });
-
-    await orchestrator.leaveRoom(ROOM_CODE, 'player-a');
-
-    expect(rooms.left).toEqual([{ roomCode: ROOM_CODE, playerId: 'player-a' }]);
-    expect(publisher.published).toEqual([
-      { channel: ROOM_CODE, event: { event: 'room.player-left', payload: { id: 'player-a' } } }
-    ]);
-    expect(clock.expiredRoundIds).toHaveLength(0);
-  });
-
-  it('reassigns the Host when the Host leaves', async () => {
-    const newHost = makePlayer({ id: 'heir', isHost: true });
-    const { orchestrator, publisher } = build({
-      room: makeRoom({ judgeId: 'someone-else' }),
-      hostLoss: { kind: 'host-reassigned', newHost }
-    });
-
-    await orchestrator.leaveRoom(ROOM_CODE, HOST_ID);
-
-    expect(publisher.published).toEqual([
-      { channel: ROOM_CODE, event: { event: 'room.player-left', payload: { id: HOST_ID } } },
       {
         channel: ROOM_CODE,
         event: {
-          event: 'room.player-update',
-          payload: makeRoomPlayer({ id: 'heir', isHost: true })
+          event: 'room.player-joined',
+          payload: makeRoomPlayer('newcomer')
         }
       }
     ]);
   });
 
-  it('aborts and rotates immediately when the departing Player is the Judge', async () => {
-    const round = makeRound();
-    const { orchestrator, clock } = build({
-      room: makeRoom({ judgeId: JUDGE_ID }),
-      hostLoss: NOT_HOST,
-      activeRound: round
+  it('deals a late joiner a full Hand on their private channel', async () => {
+    const { orchestrator, store, publisher } = await build();
+
+    await orchestrator.joinRoom({
+      roomCode: ROOM_CODE,
+      password: null,
+      player: makePlayer({ id: 'newcomer' })
     });
+
+    const hand = (await findPlayer(store, 'newcomer'))?.cardIds ?? [];
+    expect(hand).toHaveLength(10);
+    const dealt = publisher.published.at(-1);
+    expect(dealt?.channel).toBe('newcomer');
+    if (dealt?.event.event !== 'player.cards-drawn') {
+      throw new Error(
+        `Expected player.cards-drawn last, got ${dealt?.event.event}`
+      );
+    }
+    expect(dealt.event.payload.map(card => card.id)).toEqual(hand);
+  });
+
+  it('rejects a wrong password and announces nothing', async () => {
+    const { orchestrator, publisher } = await build(
+      lobbySeed({
+        room: makeRoom({
+          status: 'LOBBY',
+          round: 0,
+          hostId: HOST_ID,
+          judgeId: null,
+          isPublic: false,
+          password: 'right'
+        })
+      })
+    );
+
+    await expect(
+      orchestrator.joinRoom({
+        roomCode: ROOM_CODE,
+        password: 'wrong',
+        player: makePlayer({ id: 'newcomer' })
+      })
+    ).rejects.toThrow(BadRequestError);
+    expect(publisher.published).toEqual([]);
+  });
+});
+
+describe('RoomOrchestrator.startRoom', () => {
+  function readyLobby(): GameSeed {
+    return lobbySeed({
+      room: makeRoom({
+        status: 'LOBBY',
+        round: 0,
+        hostId: HOST_ID,
+        judgeId: null,
+        password: 'secret'
+      }),
+      players: [HOST_ID, 'player-a', 'player-b'].map(id =>
+        makePlayer({ id: id, isHost: id === HOST_ID, isReady: true })
+      )
+    });
+  }
+
+  it('broadcasts the sanitized start, sends each Hand privately, arms Round 1 and announces it', async () => {
+    const { orchestrator, store, clock, publisher } = await build(readyLobby());
+
+    await orchestrator.startRoom(ROOM_CODE, HOST_ID);
+
+    const round = await store.rounds.find(ROOM_CODE, 1);
+    const room = await store.rooms.getRoomByCode(ROOM_CODE);
+    const [started, ...rest] = publisher.published;
+    expect(started.event.event).toBe('room.started');
+    expect(JSON.stringify(started.event.payload)).not.toContain('secret');
+    const hands = rest.filter(
+      ({ event }) => event.event === 'player.cards-drawn'
+    );
+    expect(hands.map(({ channel }) => channel).sort()).toEqual([
+      HOST_ID,
+      'player-a',
+      'player-b'
+    ]);
+    expect(clock.armedPlayRoundIds).toEqual([round?.id]);
+    expect(publisher.published.at(-1)?.event).toEqual({
+      event: 'room.round-start',
+      payload: {
+        roundNumber: 1,
+        judgeId: room?.judgeId,
+        blackCard: makeBlackCard({ id: 'black-1' })
+      }
+    });
+  });
+
+  it('refuses a start from a non-Host and announces nothing', async () => {
+    const { orchestrator, clock, publisher } = await build(readyLobby());
+
+    await expect(orchestrator.startRoom(ROOM_CODE, 'player-a')).rejects.toThrow(
+      BadRequestError
+    );
+    expect(publisher.published).toEqual([]);
+    expect(clock.armedPlayRoundIds).toEqual([]);
+  });
+});
+
+describe('RoomOrchestrator.leaveRoom', () => {
+  it('removes the Player and announces the leave with no fallout for a non-Host non-Judge', async () => {
+    const { orchestrator, store, clock, publisher } = await build();
+
+    await orchestrator.leaveRoom(ROOM_CODE, 'player-a');
+
+    expect(await findPlayer(store, 'player-a'))?.toBeUndefined();
+    expect(publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: { event: 'room.player-left', payload: { id: 'player-a' } }
+      }
+    ]);
+    expect(clock.expiredRoundIds).toHaveLength(0);
+  });
+
+  it('hands the Host to an active Player when the Host leaves mid-game', async () => {
+    const { orchestrator, store, publisher } = await build();
+
+    await orchestrator.leaveRoom(ROOM_CODE, HOST_ID);
+
+    const room = await store.rooms.getRoomByCode(ROOM_CODE);
+    expect(publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: { event: 'room.player-left', payload: { id: HOST_ID } }
+      },
+      {
+        channel: ROOM_CODE,
+        event: {
+          event: 'room.player-update',
+          payload: makeRoomPlayer(room?.hostId ?? '', { isHost: true })
+        }
+      }
+    ]);
+    expect(room?.hostId).not.toBe(HOST_ID);
+  });
+
+  it('ends a LOBBY Room when its Host leaves', async () => {
+    const { orchestrator, store, publisher } = await build(lobbySeed());
+
+    await orchestrator.leaveRoom(ROOM_CODE, HOST_ID);
+
+    expect(publisher.published.at(-1)?.event.event).toBe('room.game-end');
+    expect((await store.rooms.getRoomByCode(ROOM_CODE))?.status).toBe(
+      'FINISHED'
+    );
+  });
+
+  it('aborts and rotates immediately when the departing Player is the Judge', async () => {
+    const { orchestrator, clock } = await build();
 
     await orchestrator.leaveRoom(ROOM_CODE, JUDGE_ID);
 
-    expect(clock.expiredRoundIds).toEqual([round.id]);
+    expect(clock.expiredRoundIds).toEqual(['round-1']);
     expect(clock.gracedRoundIds).toHaveLength(0);
   });
 });
 
 describe('RoomOrchestrator.markPresence', () => {
   it('broadcasts the re-activated Player on reconnect with no departure fallout', async () => {
-    const { orchestrator, rooms, clock, publisher } = build({
-      presencePlayer: makePlayer({ id: JUDGE_ID }),
-      room: makeRoom()
-    });
+    const seed = gameSeed();
+    seed.players = [
+      makePlayer({ id: HOST_ID, isHost: true }),
+      makePlayer({ id: JUDGE_ID, isActive: false })
+    ];
+    const { orchestrator, store, clock, publisher } = await build(seed);
 
     await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, true);
 
-    expect(rooms.setActiveCalls).toEqual([
-      { roomCode: ROOM_CODE, playerId: JUDGE_ID, isActive: true }
-    ]);
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: makeRoomPlayer({ id: JUDGE_ID, isActive: true })
+          payload: makeRoomPlayer(JUDGE_ID)
         }
       }
     ]);
+    expect((await findPlayer(store, JUDGE_ID))?.isActive).toBe(true);
     expect(clock.gracedRoundIds).toHaveLength(0);
   });
 
+  it('releases the held Round when the dropped Judge reconnects', async () => {
+    const { orchestrator, clock } = await build();
+
+    await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, true);
+
+    expect(clock.returnedRoundIds).toEqual(['round-1']);
+  });
+
+  it('does not touch the clock when a non-Judge reconnects', async () => {
+    const { orchestrator, clock } = await build();
+
+    await orchestrator.markPresence(ROOM_CODE, 'player-a', true);
+
+    expect(clock.returnedRoundIds).toHaveLength(0);
+  });
+
   it('arms the Judge grace timer on a drop of the current Judge', async () => {
-    const round = makeRound();
-    const { orchestrator, clock } = build({
-      presencePlayer: makePlayer({ id: JUDGE_ID }),
-      room: makeRoom({ judgeId: JUDGE_ID }),
-      hostLoss: NOT_HOST,
-      activeRound: round
-    });
+    const { orchestrator, store, clock } = await build();
 
     await orchestrator.markPresence(ROOM_CODE, JUDGE_ID, false);
 
-    expect(clock.gracedRoundIds).toEqual([round.id]);
+    expect(clock.gracedRoundIds).toEqual(['round-1']);
     expect(clock.expiredRoundIds).toHaveLength(0);
+    expect((await findPlayer(store, JUDGE_ID))?.isActive).toBe(false);
   });
 
   // Regression: a Host refresh in LOBBY closed the socket and ended the Room.
   it('keeps the Room and its Host when the Host drops in LOBBY', async () => {
-    const { orchestrator, rooms, publisher } = build({
-      presencePlayer: makePlayer({ id: HOST_ID, isHost: true }),
-      room: makeRoom({ status: 'LOBBY', judgeId: null }),
-      hostLoss: { kind: 'room-ended', ranking: [] }
-    });
+    const { orchestrator, store, publisher } = await build(lobbySeed());
 
     await orchestrator.markPresence(ROOM_CODE, HOST_ID, false);
 
-    expect(rooms.hostLossCalls).toHaveLength(0);
     expect(publisher.published).toEqual([
       {
         channel: ROOM_CODE,
         event: {
           event: 'room.player-update',
-          payload: makeRoomPlayer({ id: HOST_ID, isHost: true, isActive: false })
+          payload: makeRoomPlayer(HOST_ID, { isHost: true, isActive: false })
         }
       }
     ]);
+    const room = await store.rooms.getRoomByCode(ROOM_CODE);
+    expect(room).toEqual(
+      expect.objectContaining({ status: 'LOBBY', hostId: HOST_ID })
+    );
   });
 
   it('still hands Host over when the Host drops IN_PROGRESS', async () => {
-    const newHost = makePlayer({ id: 'player-a', isHost: true });
-    const { orchestrator, rooms } = build({
-      presencePlayer: makePlayer({ id: HOST_ID, isHost: true }),
-      room: makeRoom(),
-      hostLoss: { kind: 'host-reassigned', newHost }
-    });
+    const { orchestrator, store } = await build();
 
     await orchestrator.markPresence(ROOM_CODE, HOST_ID, false);
 
-    expect(rooms.hostLossCalls).toEqual([HOST_ID]);
+    const room = await store.rooms.getRoomByCode(ROOM_CODE);
+    expect(room?.hostId).not.toBe(HOST_ID);
+    expect((await findPlayer(store, room?.hostId ?? ''))?.isHost).toBe(true);
+    expect((await findPlayer(store, HOST_ID))?.isHost).toBe(false);
   });
 });
 
 describe('RoomOrchestrator.endRoom', () => {
   it('ends the game and broadcasts the final Ranking for the Host', async () => {
-    const ranking: Ranking = [
-      { id: HOST_ID, username: 'host', avatarUrl: null, score: 5 }
+    const seed = gameSeed();
+    seed.players = [
+      makePlayer({ id: HOST_ID, isHost: true, score: 1 }),
+      makePlayer({ id: JUDGE_ID, score: 3 })
     ];
-    const { orchestrator, rooms, publisher } = build({
-      room: makeRoom(),
-      ranking
-    });
+    const { orchestrator, store, publisher } = await build(seed);
 
-    const result = await orchestrator.endRoom(ROOM_CODE, HOST_ID);
+    const ranking = await orchestrator.endRoom(ROOM_CODE, HOST_ID);
 
-    expect(result).toBe(ranking);
-    expect(rooms.endGameCalls).toEqual([ROOM_CODE]);
-    expect(publisher.published).toEqual([
-      { channel: ROOM_CODE, event: { event: 'room.game-end', payload: ranking } }
+    expect(ranking).toEqual([
+      { id: JUDGE_ID, username: JUDGE_ID, avatarUrl: null, score: 3 },
+      { id: HOST_ID, username: HOST_ID, avatarUrl: null, score: 1 }
     ]);
+    expect(publisher.published).toEqual([
+      {
+        channel: ROOM_CODE,
+        event: { event: 'room.game-end', payload: ranking }
+      }
+    ]);
+    expect((await store.rooms.getRoomByCode(ROOM_CODE))?.status).toBe(
+      'FINISHED'
+    );
+    expect((await store.rounds.findById('round-1'))?.status).toBe('ABORTED');
   });
 
   it('rejects a non-Host and does not end the game', async () => {
-    const { orchestrator, rooms } = build({ room: makeRoom() });
+    const { orchestrator, store, publisher } = await build();
 
-    await expect(orchestrator.endRoom(ROOM_CODE, 'intruder')).rejects.toThrow(
+    await expect(orchestrator.endRoom(ROOM_CODE, 'player-a')).rejects.toThrow(
       BadRequestError
     );
-    expect(rooms.endGameCalls).toHaveLength(0);
+    expect(publisher.published).toEqual([]);
+    expect((await store.rooms.getRoomByCode(ROOM_CODE))?.status).toBe(
+      'IN_PROGRESS'
+    );
   });
 });
 
+describe('RoomOrchestrator.playerRoomCodes', () => {
+  it('lists the Rooms the Player belongs to', async () => {
+    const { orchestrator } = await build();
+
+    expect(await orchestrator.playerRoomCodes('player-a')).toEqual([ROOM_CODE]);
+  });
+});
 
 describe('Room lifecycle logging', () => {
   it('records membership changes without the password or private Hand', async () => {
-    const { orchestrator, output } = build({ room: makeRoom({ status: 'LOBBY', password: 'private-password' }) });
-    await orchestrator.joinRoom({ roomCode: ROOM_CODE, password: 'private-password', player: makePlayer({ cardIds: ['private-card'] }) });
-    expect(JSON.parse(output.lines[0])).toMatchObject({ event: 'room.player_joined', roomCode: ROOM_CODE, playerId: 'player-a' });
+    const { orchestrator, output } = await build(
+      lobbySeed({
+        room: makeRoom({
+          status: 'LOBBY',
+          round: 0,
+          hostId: HOST_ID,
+          judgeId: null,
+          isPublic: false,
+          password: 'private-password'
+        })
+      })
+    );
+
+    await orchestrator.joinRoom({
+      roomCode: ROOM_CODE,
+      password: 'private-password',
+      player: makePlayer({ id: 'newcomer', cardIds: ['private-card'] })
+    });
+
+    expect(JSON.parse(output.lines[0])).toMatchObject({
+      event: 'room.player_joined',
+      roomCode: ROOM_CODE,
+      playerId: 'newcomer'
+    });
     expect(output.lines.join('')).not.toMatch(/private-/);
   });
 });
