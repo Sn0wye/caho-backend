@@ -40,6 +40,63 @@ function buildHttpHarness() {
 }
 
 describe('HTTP observability', () => {
+  it('keeps the matched endpoint when a handler delegates to not found', async () => {
+    const { app, output } = buildHttpHarness();
+    app.get('/auth/callback/:provider', async (_request, reply) =>
+      reply.callNotFound()
+    );
+    const response = await app.inject(
+      '/auth/callback/google?code=private-code'
+    );
+    await app.close();
+    expect(response.statusCode).toBe(404);
+    expect(
+      output.lines
+        .map(line => JSON.parse(line))
+        .find(record => record.event === 'http.request_completed')
+    ).toMatchObject({ route: '/auth/callback/:provider', statusCode: 404 });
+    expect(output.lines.join('')).not.toContain('private-code');
+  });
+
+  it('identifies unknown endpoints without logging query secrets', async () => {
+    const { app, output } = buildHttpHarness();
+    const response = await app.inject('/missing-endpoint?code=private-code');
+    await app.close();
+    expect(response.statusCode).toBe(404);
+    expect(
+      output.lines
+        .map(line => JSON.parse(line))
+        .find(record => record.event === 'http.request_completed')
+    ).toMatchObject({
+      route: 'unmatched',
+      requestPath: '/missing-endpoint',
+      statusCode: 404
+    });
+    expect(output.lines.join('')).not.toContain('private-code');
+    const span = harness.exporter.getFinishedSpans()[0];
+    expect(span.name).toBe('GET /missing-endpoint');
+    expect(span.attributes).toMatchObject({
+      'http.route': 'unmatched',
+      'url.path': '/missing-endpoint',
+      'http.response.status_code': 404
+    });
+    expect(JSON.stringify(span.attributes)).not.toContain('private-code');
+  });
+
+  it('bounds unknown endpoint paths in request logs', async () => {
+    const { app, output } = buildHttpHarness();
+    await app.inject(`/${'x'.repeat(4096)}?token=private-token`);
+    await app.close();
+    const summary = output.lines
+      .map(line => JSON.parse(line))
+      .find(record => record.event === 'http.request_completed');
+    expect(summary.requestPath).toBe(`/${'x'.repeat(2047)}`);
+    expect(output.lines.join('')).not.toContain('private-token');
+    expect(harness.exporter.getFinishedSpans()[0].name).toBe(
+      `GET /${'x'.repeat(2047)}`
+    );
+  });
+
   it('ends the server span for hijacked WebSocket handshakes', async () => {
     const { app, output } = buildHttpHarness();
     await app.register(fastifyWebsocket);
@@ -100,6 +157,14 @@ describe('HTTP observability', () => {
     expect(
       records.filter(record => record.event === 'http.request_completed')
     ).toHaveLength(2);
+    expect(
+      records
+        .filter(record => record.event === 'http.request_completed')
+        .every(
+          record =>
+            record.route === '/auth/callback/:provider' && !record.requestPath
+        )
+    ).toBe(true);
     const work = records.filter(record => record.event === 'inside.request');
     expect(new Set(work.map(record => record.trace_id)).size).toBe(2);
     expect(work.some(record => record.trace_id === traceId)).toBe(true);
