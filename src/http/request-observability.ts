@@ -14,18 +14,28 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 const requestSpans = new WeakMap<FastifyRequest, Span>();
 const requestStartTimes = new WeakMap<FastifyRequest, number>();
+const matchedRequestRoutes = new WeakMap<FastifyRequest, string>();
 const completedRequests = new WeakSet<FastifyRequest>();
 const HEALTH_ROUTES = new Set(['/ping', '/readyz']);
 
 function requestRoute(request: FastifyRequest): string {
   // Route templates avoid OAuth codes, query strings and attacker-controlled paths.
-  return request.routeOptions.url ?? 'unmatched';
+  return (
+    matchedRequestRoutes.get(request) ?? request.routeOptions.url ?? 'unmatched'
+  );
+}
+
+function unmatchedRequestPath(request: FastifyRequest): string | undefined {
+  if (requestRoute(request) !== 'unmatched') return undefined;
+  // Unknown endpoints need a bounded path for diagnosis, never query credentials.
+  return request.url.split(/[?#]/, 1)[0].slice(0, 2048);
 }
 
 interface RequestCompletionFields {
   event: string;
   method: string;
   route: string;
+  requestPath?: string;
   statusCode: number;
   durationMs: number;
   roomCode?: string;
@@ -44,10 +54,12 @@ function requestCompletionFields(
   statusCode: number,
   durationMs: number
 ): RequestCompletionFields {
+  const route = requestRoute(request);
   return {
     event: 'http.request_completed',
     method: request.method,
-    route: requestRoute(request),
+    route,
+    requestPath: unmatchedRequestPath(request),
     statusCode,
     durationMs,
     roomCode: requestRoomCode(request)
@@ -116,12 +128,17 @@ function completeRequest(
 
 function beginRequest(request: FastifyRequest): Context {
   const route = requestRoute(request);
+  const requestPath = unmatchedRequestPath(request);
   const parent = propagation.extract(ROOT_CONTEXT, request.headers);
   const span = trace.getTracer('caho.http').startSpan(
-    `${request.method} ${route}`,
+    `${request.method} ${requestPath ?? route}`,
     {
       kind: SpanKind.SERVER,
-      attributes: { 'http.request.method': request.method, 'http.route': route }
+      attributes: {
+        'http.request.method': request.method,
+        'http.route': route,
+        'url.path': requestPath
+      }
     },
     parent
   );
@@ -133,6 +150,9 @@ function beginRequest(request: FastifyRequest): Context {
 /** Install one request event and one server span per request. Example: installHttpObservability(app). */
 export function installHttpObservability(app: Pick<App, 'addHook'>): void {
   app.addHook('onRequest', (request, reply, done) => {
+    // Fastify's callNotFound() replaces the route context before onResponse runs.
+    if (request.routeOptions.url)
+      matchedRequestRoutes.set(request, request.routeOptions.url);
     if (HEALTH_ROUTES.has(requestRoute(request))) return done();
     const requestContext = beginRequest(request);
     reply.header('x-request-id', request.id);
