@@ -3,21 +3,18 @@ import type { JoinRoomDTO } from '@/dto/JoinRoom';
 import type { LeaveRoomDTO } from '@/dto/LeaveRoom';
 import type { BlackCard as DrawnBlackCard } from '@/repositories/cards';
 import type {
-  BlackCard,
   Player,
-  PublicRoomWithPlayerCountAndHost,
   Ranking,
   Room,
   Round,
   RoundPlayedCard,
-  RoundStatus,
   WhiteCard
 } from '@/schemas';
 
+// Room rules and commands. Reads a viewer may see live in RoomView (issue #26).
 export interface IRoomService {
   getRoom(roomCode: string): Promise<Room>;
   createRoom(room: CreateRoomDTO): Promise<Room>;
-  listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]>;
   addPlayerToRoom(input: { roomCode: string; player: Player }): Promise<void>;
   startGame(roomCode: string, requesterId: string): Promise<GameStart>;
   endGame(roomCode: string): Promise<Ranking>;
@@ -34,37 +31,22 @@ export interface IRoomService {
     isActive: boolean
   ): Promise<Player>;
   togglePlayerReady(roomCode: string, playerId: string): Promise<Player>;
-  getRoomPlayers(roomCode: string): Promise<Player[]>;
-  getRoomBlackCardId(roomCode: string): Promise<string | null>;
   updatePlayerInRoom(
     roomCode: string,
     playerId: string,
     payload: Partial<Player>
   ): Promise<Player>;
-  getPlayerFromRoom(roomCode: string, playerId: string): Promise<Player>;
   incrementPlayerScore(input: {
     roomCode: string;
     playerId: string;
     by: number;
   }): Promise<void>;
-  updateRoom(roomCode: string, data: Partial<Room>): Promise<Room>;
-  getCurrentWhiteCards(
-    roomCode: string,
-    playerId: string
-  ): Promise<WhiteCard[]>;
   setPlayersAsUnready(roomCode: string): Promise<void>;
   playCards(
     roomCode: string,
     playerId: string,
     playedCardIds: string[]
   ): Promise<PlayResult>;
-  getRoundPlayedCards(
-    roomCode: string,
-    roundNumber: number
-  ): Promise<RoundPlayedCard[]>;
-  getActiveRound(roomCode: string): Promise<Round | null>;
-  getRoundSnapshot(roomCode: string): Promise<RoundSnapshot | null>;
-  getRoundNumber(roomCode: string): Promise<number>;
   checkJudgePick(data: JudgeChooseWinnerDTO): Promise<JudgePick>;
   scoreRoundWinner(room: Room, winnerPlayerId: string): Promise<RoundScore>;
   dealInitialHands(data: {
@@ -90,18 +72,6 @@ export type GameStart = {
 // A Player's accepted answer: the Player as stored afterwards (isReady true) and
 // the White Cards dealt to refill their Hand.
 export type PlayResult = { player: Player; cardsDrawn: WhiteCard[] };
-
-// REST view of the current Round for a (re)connecting client. Played Cards are
-// empty until the Round reaches judging.
-export type RoundSnapshot = {
-  roundNumber: number;
-  status: RoundStatus;
-  judgeId: string;
-  playDeadline: Date | null;
-  judgeDeadline: Date | null;
-  blackCard: BlackCard | null;
-  roundPlayedCards: RoundPlayedCard[];
-};
 
 // Outcome of a Host departing (explicit Leave or a connection drop), branched on
 // Room status per ADR-0002. Drives the Room-level broadcast: the Room either ends

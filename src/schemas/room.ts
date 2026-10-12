@@ -39,7 +39,28 @@ export const publicRoomWithPlayerCountAndHost = z.object({
   hostUsername: z.string()
 });
 
-export const sanitizedRoomSchema = roomSchema.omit({ password: true });
+// What any viewer may see of a Room: everything but the password. Written out
+// rather than `roomSchema.omit(...)` because roomSchema parses form input
+// (`isPublic` from a string, `round` positive) and would reject a stored Room
+// when used as a response schema. Room read endpoints declare it so Fastify
+// drops undeclared fields. See issue #26.
+export const sanitizedRoomSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  maxPlayers: z.number().int(),
+  maxPoints: z.number().int(),
+  status: z.enum(['LOBBY', 'IN_PROGRESS', 'FINISHED']),
+  hostId: z.string(),
+  isPublic: z.boolean(),
+  prevJudgeId: z.string().nullable(),
+  judgeId: z.string().nullable(),
+  round: z.number().int(),
+  pickedWhiteCards: z.array(z.string()),
+  pickedBlackCards: z.array(z.string()),
+  currentBlackCardId: z.string().nullable(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date()
+});
 
 export type Room = z.infer<typeof roomSchema>;
 

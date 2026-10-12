@@ -1,9 +1,18 @@
 import { FailureLogWindow } from '@/lib/failure-log-window';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
-export const checkRoutes = async (app: FastifyInstance) => {
+// The two dependencies readiness pings, passed in so a spec can fake them.
+export type ReadinessProbes = {
+  postgres: { execute(query: SQL): Promise<unknown> };
+  redis: { ping(): Promise<string> };
+};
+
+export const checkRoutes = async (
+  app: FastifyInstance,
+  { probes }: { probes: ReadinessProbes }
+) => {
   const failures = new FailureLogWindow(Date.now);
   app.get(
     '/readyz',
@@ -39,14 +48,14 @@ export const checkRoutes = async (app: FastifyInstance) => {
       };
 
       try {
-        await app.db.execute(sql`SELECT 1`);
+        await probes.postgres.execute(sql`SELECT 1`);
         readinessRecovered(req.log, 'postgres', failures);
       } catch (err) {
         readinessFailure(req.log, 'postgres', err, failures);
         healthStatus.db = false;
       }
       try {
-        await app.redis.ping();
+        await probes.redis.ping();
         readinessRecovered(req.log, 'redis', failures);
       } catch (err) {
         readinessFailure(req.log, 'redis', err, failures);

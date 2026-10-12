@@ -1,12 +1,12 @@
 import type { App } from '@/app';
+import type { GameModules } from '@/composition/game-modules';
+import { joinRoomRequest, joinRoomResponse } from '@/contracts';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
-import { joinRoomRequest } from '@/contracts';
-import type { Player } from '@/schemas';
 
-export const joinRoomController = async (app: App) => {
-  const roomOrchestrator = RoomOrchestratorFactory();
-
+export const joinRoomController = async (
+  app: App,
+  { rooms }: GameModules
+) => {
   app.register(ensureAuth).post(
     '/join',
     {
@@ -14,26 +14,12 @@ export const joinRoomController = async (app: App) => {
         tags: ['Rooms'],
         description: 'Join a room',
         body: joinRoomRequest,
+        response: {
+          200: joinRoomResponse
+        },
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async req => {
-      const user = req.getUser();
-      const { roomCode, password } = req.body;
-
-      const player: Player = {
-        id: user.id,
-        score: 0,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        isReady: false,
-        isHost: false,
-        isJudge: false,
-        isActive: true,
-        cardIds: []
-      };
-
-      return roomOrchestrator.joinRoom({ roomCode, password, player });
-    }
+    async req => rooms.joinRoom({ ...req.body, user: req.getUser() })
   );
 };

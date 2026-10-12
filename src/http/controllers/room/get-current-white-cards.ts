@@ -1,11 +1,14 @@
 import type { App } from '@/app';
+import type { GameModules } from '@/composition/game-modules';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { whiteCard } from '@/schemas';
 import { z } from 'zod';
 
-export const getCurrentWhiteCardsController = async (app: App) => {
-  const roomService = RoomServiceFactory();
-
+// The caller's own Hand; never anyone else's.
+export const getCurrentWhiteCardsController = async (
+  app: App,
+  { roomView }: GameModules
+) => {
   app.register(ensureAuth).get(
     '/:roomCode/white-cards',
     {
@@ -14,21 +17,13 @@ export const getCurrentWhiteCardsController = async (app: App) => {
         params: z.object({
           roomCode: z.string().min(6).max(6)
         }),
+        response: {
+          200: z.array(whiteCard)
+        },
         description: 'Get current white cards',
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async req => {
-      const user = req.getUser();
-
-      const { roomCode } = req.params;
-
-      const currentWhiteCards = await roomService.getCurrentWhiteCards(
-        roomCode,
-        user.id
-      );
-
-      return currentWhiteCards;
-    }
+    async req => roomView.hand(req.params.roomCode, req.getUser().id)
   );
 };

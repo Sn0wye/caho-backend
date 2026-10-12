@@ -1,10 +1,13 @@
 import type { App } from '@/app';
+import type { AuthService } from '@/services/auth/AuthService';
 import { signInRequest, signInResponse } from '@/contracts';
 import { UnauthorizedError } from '@/errors';
 import { errorSchema } from '@/schemas';
-import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 
-export const signInController = async (app: App) => {
+export const signInController = async (
+  app: App,
+  { auth: authService }: { auth: Pick<AuthService, 'signIn'> }
+) => {
   app.post(
     '/sign-in',
     {
@@ -22,7 +25,6 @@ export const signInController = async (app: App) => {
       const { username, password } = req.body;
 
       try {
-        const authService = AuthServiceFactory();
         const { cookie, user } = await authService.signIn(username, password);
 
         res.setCookie(cookie.name, cookie.value, cookie.attributes);

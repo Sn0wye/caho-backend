@@ -1,9 +1,12 @@
 import type { App } from '@/app';
+import type { AuthModules } from '@/http/routes/auth';
 import { signUpRequest, signUpResponse } from '@/contracts';
 import { errorSchema } from '@/schemas';
-import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 
-export const signUpController = async (app: App) => {
+export const signUpController = async (
+  app: App,
+  { auth: authService }: Pick<AuthModules, 'auth'>
+) => {
   app.post(
     '/sign-up',
     {
@@ -18,7 +21,6 @@ export const signUpController = async (app: App) => {
       }
     },
     async (req, res) => {
-      const authService = AuthServiceFactory();
 
       const { username, password } = req.body;
       const { cookie, user } = await authService.signUp(username, password);

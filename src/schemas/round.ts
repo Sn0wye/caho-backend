@@ -1,4 +1,4 @@
-import { whiteCard } from './card';
+import { drawnBlackCard, whiteCard } from './card';
 import { playerSchema } from './player';
 import { roomSchema } from './room';
 import { publicUserSchema } from './user';
@@ -46,6 +46,20 @@ export const roundWithRelations = roundSchema.extend({
   roundPlayedCards: z.array(roundPlayedCardsSchema)
 });
 
+// REST view of the current Round for a (re)connecting client, since the WS
+// stream only carries live deltas. Played Cards stay empty until the Round
+// reaches judging; RoomView owns that rule. issue #26.
+export const roundSnapshotSchema = z.object({
+  roundNumber: z.number().int(),
+  status: roundStatusSchema,
+  judgeId: z.string(),
+  playDeadline: z.date().nullable(),
+  judgeDeadline: z.date().nullable(),
+  blackCard: drawnBlackCard.nullable(),
+  roundPlayedCards: z.array(roundPlayedCardsSchema)
+});
+
+export type RoundSnapshot = z.infer<typeof roundSnapshotSchema>;
 export type Round = z.infer<typeof roundSchema>;
 export type RoundStatus = z.infer<typeof roundStatusSchema>;
 export type RoundWithRelations = z.infer<typeof roundWithRelations>;

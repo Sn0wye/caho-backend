@@ -91,7 +91,7 @@ describe('RoomOrchestrator.joinRoom', () => {
     const room = await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: null,
-      player: makePlayer({ id: 'newcomer' })
+      user: makePlayer({ id: 'newcomer' })
     });
 
     expect(room.code).toBe(ROOM_CODE);
@@ -113,7 +113,7 @@ describe('RoomOrchestrator.joinRoom', () => {
     await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: null,
-      player: makePlayer({ id: 'newcomer' })
+      user: makePlayer({ id: 'newcomer' })
     });
 
     const hand = (await findPlayer(store, 'newcomer'))?.cardIds ?? [];
@@ -146,7 +146,7 @@ describe('RoomOrchestrator.joinRoom', () => {
       orchestrator.joinRoom({
         roomCode: ROOM_CODE,
         password: 'wrong',
-        player: makePlayer({ id: 'newcomer' })
+        user: makePlayer({ id: 'newcomer' })
       })
     ).rejects.toThrow(BadRequestError);
     expect(publisher.published).toEqual([]);
@@ -487,7 +487,7 @@ describe('Room lifecycle logging', () => {
     await orchestrator.joinRoom({
       roomCode: ROOM_CODE,
       password: 'private-password',
-      player: makePlayer({ id: 'newcomer', cardIds: ['private-card'] })
+      user: makePlayer({ id: 'newcomer', cardIds: ['private-card'] })
     });
 
     expect(JSON.parse(output.lines[0])).toMatchObject({

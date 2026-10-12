@@ -1,11 +1,12 @@
 import type { App } from '@/app';
+import type { GameModules } from '@/composition/game-modules';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
 import { startRoom } from '@/contracts';
 
-export const startRoomController = async (app: App) => {
-  const roomOrchestrator = RoomOrchestratorFactory();
-
+export const startRoomController = async (
+  app: App,
+  { rooms: roomOrchestrator }: GameModules
+) => {
   app.register(ensureAuth).post(
     '/start',
     {

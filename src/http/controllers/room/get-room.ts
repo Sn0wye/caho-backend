@@ -1,11 +1,13 @@
 import type { App } from '@/app';
+import type { GameModules } from '@/composition/game-modules';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { sanitizedRoomSchema } from '@/schemas';
 import { z } from 'zod';
 
-export const getRoomController = async (app: App) => {
-  const roomService = RoomServiceFactory();
-
+export const getRoomController = async (
+  app: App,
+  { roomView }: GameModules
+) => {
   app.register(ensureAuth).get(
     '/:roomCode',
     {
@@ -15,15 +17,12 @@ export const getRoomController = async (app: App) => {
         params: z.object({
           roomCode: z.string().min(6).max(6)
         }),
+        response: {
+          200: sanitizedRoomSchema
+        },
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async req => {
-      const { roomCode } = req.params;
-      const { password, ...sanitizedRoom } = await roomService.getRoom(
-        roomCode
-      );
-      return sanitizedRoom;
-    }
+    async req => roomView.room(req.params.roomCode)
   );
 };

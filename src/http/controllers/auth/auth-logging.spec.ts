@@ -10,21 +10,13 @@ import {
   serializerCompiler,
   validatorCompiler
 } from 'fastify-type-provider-zod';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeAuthLogService } from './auth-logging.fakes';
+import { describe, expect, it } from 'vitest';
+import { FakeAuthLogService } from './auth-logging.fakes';
 import { signInController } from './sign-in';
 import { signOutController } from './sign-out';
 
-vi.mock('@/services/auth/AuthServiceFactory', async () => {
-  const { fakeAuthLogService } = await import('./auth-logging.fakes');
-  return { AuthServiceFactory: () => fakeAuthLogService };
-});
-afterEach(() => {
-  fakeAuthLogService.signInError = undefined;
-  fakeAuthLogService.signOutError = undefined;
-});
-
 function buildAuthHarness(authenticated = true) {
+  const auth = new FakeAuthLogService();
   const output = new FakeConsoleOutput();
   const { logger } = buildLogger({ consoleOutput: output });
   const app = fastify({
@@ -47,15 +39,15 @@ function buildAuthHarness(authenticated = true) {
       };
     };
   });
-  app.register(signInController);
-  app.register(signOutController);
-  return { app, output };
+  app.register(signInController, { auth });
+  app.register(signOutController, { auth });
+  return { app, output, auth };
 }
 
 describe('auth failure logging', () => {
   it('preserves 401 for wrong credentials while surfacing dependency failures as 500', async () => {
-    const { app, output } = buildAuthHarness();
-    fakeAuthLogService.signInError = new UnauthorizedError(
+    const { app, output, auth } = buildAuthHarness();
+    auth.signInError = new UnauthorizedError(
       'invalid credentials'
     );
     const rejected = await app.inject({
@@ -64,7 +56,7 @@ describe('auth failure logging', () => {
       payload: { username: 'user', password: 'private-password' }
     });
     expect(rejected.statusCode).toBe(401);
-    fakeAuthLogService.signInError = new Error('DB unavailable');
+    auth.signInError = new Error('DB unavailable');
     const failed = await app.inject({
       method: 'POST',
       url: '/sign-in',
@@ -86,8 +78,8 @@ describe('auth failure logging', () => {
         .statusCode
     ).toBe(204);
     await anonymous.app.close();
-    const { app, output } = buildAuthHarness();
-    fakeAuthLogService.signOutError = new Error('session deletion failed');
+    const { app, output, auth } = buildAuthHarness();
+    auth.signOutError = new Error('session deletion failed');
     expect(
       (await app.inject({ method: 'POST', url: '/sign-out' })).statusCode
     ).toBe(500);

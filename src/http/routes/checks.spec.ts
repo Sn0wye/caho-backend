@@ -9,22 +9,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkRoutes } from './checks';
-
-class FakeReadinessPostgres {
-  available = true;
-  async execute(_statement: unknown): Promise<unknown[]> {
-    if (!this.available) throw new Error('PostgreSQL unavailable');
-    return [];
-  }
-}
-
-class FakeReadinessRedis {
-  available = true;
-  async ping(): Promise<string> {
-    if (!this.available) throw new Error('Redis unavailable');
-    return 'PONG';
-  }
-}
+import { FakeReadinessPostgres, FakeReadinessRedis } from './checks.fakes';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -43,10 +28,8 @@ describe('readiness outage logging', () => {
     }).withTypeProvider<ZodTypeProvider>();
     app.setValidatorCompiler(validatorCompiler);
     app.setSerializerCompiler(serializerCompiler);
-    app.decorate('db', postgres as unknown as typeof app.db);
-    app.decorate('redis', redis as unknown as typeof app.redis);
     installHttpObservability(app);
-    app.register(checkRoutes);
+    app.register(checkRoutes, { probes: { postgres, redis } });
     try {
       expect((await app.inject('/readyz')).statusCode).toBe(200);
       expect(output.lines).toHaveLength(0);

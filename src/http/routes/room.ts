@@ -1,4 +1,5 @@
 import type { App } from '@/app';
+import type { GameModules } from '@/composition/game-modules';
 import { createRoomController } from '../controllers/room/create-room';
 import { endRoomController } from '../controllers/room/end-room';
 import { getRoomController } from '../controllers/room/get-room';
@@ -15,21 +16,26 @@ import { getRoundPlayedCardsController } from '../controllers/room/get-round-pla
 import { getRoundController } from '../controllers/room/get-round';
 import { judgeChooseWinner } from '../controllers/room/judge-choose-winner';
 
-export const roomRoutes = async (app: App) => {
-  app.register(listPublicController);
-  app.register(getRoomController);
-  app.register(getRoomPlayersController);
-  app.register(getRoomBlackCardController);
-  app.register(createRoomController);
-  app.register(joinRoomController);
-  app.register(leaveRoomController);
-  app.register(startRoomController);
-  app.register(endRoomController);
-  app.register(playerReadyController);
-  app.register(getCurrentWhiteCardsController);
-  app.register(playCardsController);
-  app.register(getRoundPlayedCardsController);
-  app.register(getRoundController);
+export const roomRoutes = async (
+  app: App,
+  { rooms, rounds, roomView }: GameModules
+) => {
+  // Picked, not forwarded: the options also carry this plugin's `prefix`.
+  const modules: GameModules = { rooms, rounds, roomView };
+  app.register(listPublicController, modules);
+  app.register(getRoomController, modules);
+  app.register(getRoomPlayersController, modules);
+  app.register(getRoomBlackCardController, modules);
+  app.register(createRoomController, modules);
+  app.register(joinRoomController, modules);
+  app.register(leaveRoomController, modules);
+  app.register(startRoomController, modules);
+  app.register(endRoomController, modules);
+  app.register(playerReadyController, modules);
+  app.register(getCurrentWhiteCardsController, modules);
+  app.register(playCardsController, modules);
+  app.register(getRoundPlayedCardsController, modules);
+  app.register(getRoundController, modules);
   // Without this the Judge had no way to pick, so every Round stalled in judging.
-  app.register(judgeChooseWinner);
+  app.register(judgeChooseWinner, modules);
 };

@@ -2,8 +2,8 @@ import type { App } from '@/app';
 import { completeSocketUpgrade } from '@/http/request-observability';
 import { SocketSession } from '@/http/socket-session';
 import { SocketSessions } from '@/http/socket-session';
-import { logger } from '@/lib/logger';
-import { RoomOrchestratorFactory } from '@/services/room/RoomOrchestratorFactory';
+import type { IGameEventSubscriber } from '@/services/IGameEventSubscriber';
+import type { RoomOrchestrator } from '@/services/room/RoomOrchestrator';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -20,8 +20,13 @@ const sessionUserId = (req: FastifyRequest): string | null => {
   }
 };
 
-export const wsRoutes = async (app: App) => {
-  const roomOrchestrator = RoomOrchestratorFactory();
+export const wsRoutes = async (
+  app: App,
+  {
+    rooms: roomOrchestrator,
+    subscriber
+  }: { rooms: RoomOrchestrator; subscriber: IGameEventSubscriber }
+) => {
   const sessions = new SocketSessions();
   app.addHook('onClose', () => sessions.close());
 
@@ -40,7 +45,7 @@ export const wsRoutes = async (app: App) => {
       } catch (error) {
         // A concurrent Leave can delete the row mid-flight; skip that Room
         // rather than tear down the socket handler.
-        logger.warn(
+        app.log.warn(
           {
             event: 'ws.presence_broadcast_failed',
             userId,
@@ -82,7 +87,7 @@ export const wsRoutes = async (app: App) => {
           conn.socket,
           req.log,
           req.params.roomCode,
-          (channel, receive) => app.pubsub.subscribe(channel, receive)
+          (channel, receive) => subscriber.subscribe(channel, receive)
         )
       );
     }
@@ -120,7 +125,7 @@ export const wsRoutes = async (app: App) => {
           conn.socket,
           req.log,
           userId,
-          (channel, receive) => app.pubsub.subscribe(channel, receive),
+          (channel, receive) => subscriber.subscribe(channel, receive),
           {
             connected: () => broadcastPresence(userId, true),
             disconnected: () => broadcastPresence(userId, false)

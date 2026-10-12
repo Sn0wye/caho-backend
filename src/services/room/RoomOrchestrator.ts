@@ -1,14 +1,22 @@
-import type { JoinRoomDTO } from '@/dto/JoinRoom';
+import type { CreateRoom } from '@/contracts';
 import { BadRequestError } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
-import { toRoomPlayer } from '@/schemas';
-import type { Ranking, Room } from '@/schemas';
+import type { Ranking, Room, SanitizedRoom } from '@/schemas';
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
 import type { RoundLifecycle } from '@/services/round/RoundLifecycle';
 import type { Logger } from 'pino';
 import type { IRoomOrchestratorService } from './IRoomOrchestratorService';
 import type { GameStart } from './IRoomService';
+import { toRoomPlayer, toSanitizedRoom } from './RoomView';
 import { HAND_SIZE } from './gameRules';
+import { type PlayerProfile, playerFromUser } from './playerFromUser';
+
+// A signed-in User asking to join a Room.
+export type JoinRoomCommand = {
+  roomCode: string;
+  password: string | null;
+  user: PlayerProfile;
+};
 
 // Orchestrates Room membership and lifecycle (join, ready, leave, start, end,
 // presence) and owns the broadcasts that follow. Pulled out of the Fastify
@@ -25,22 +33,41 @@ export class RoomOrchestrator {
     private readonly log?: Logger
   ) {}
 
-  public async joinRoom(input: JoinRoomDTO): Promise<Room> {
-    const room = await this.rooms.joinRoom(input);
-    await this.publisher.publish(input.roomCode, {
-      event: 'room.player-joined',
-      payload: toRoomPlayer(input.player)
+  // Create a Room and seat its creator as Host, in one call so the create-room
+  // controller no longer sequences two RoomService calls itself. issue #26.
+  public async createRoom(
+    settings: CreateRoom,
+    host: PlayerProfile
+  ): Promise<SanitizedRoom> {
+    const room = await this.rooms.createRoom({ ...settings, hostId: host.id });
+    await this.rooms.addPlayerToRoom({
+      roomCode: room.code,
+      player: playerFromUser(host, true)
     });
-    await this.dealLateJoiner(room, input.player.id);
     this.log?.info(
-      {
-        event: 'room.player_joined',
-        roomCode: room.code,
-        playerId: input.player.id
-      },
+      { event: 'room.created', roomCode: room.code, userId: host.id },
+      'Room created'
+    );
+    return toSanitizedRoom(room);
+  }
+
+  public async joinRoom({
+    roomCode,
+    password,
+    user
+  }: JoinRoomCommand): Promise<SanitizedRoom> {
+    const player = playerFromUser(user, false);
+    const room = await this.rooms.joinRoom({ roomCode, password, player });
+    await this.publisher.publish(roomCode, {
+      event: 'room.player-joined',
+      payload: toRoomPlayer(player)
+    });
+    await this.dealLateJoiner(room, player.id);
+    this.log?.info(
+      { event: 'room.player_joined', roomCode: room.code, playerId: player.id },
       'Player joined Room'
     );
-    return room;
+    return toSanitizedRoom(room);
   }
 
   // A Player joining an in-progress game would otherwise hold no cards; they play
@@ -73,11 +100,13 @@ export class RoomOrchestrator {
   // controller; emission belongs here (ADR-0004/0005).
   public async startRoom(roomCode: string, requesterId: string): Promise<void> {
     const start = await this.rooms.startGame(roomCode, requesterId);
-    const { password: _password, ...room } = start.room;
 
     await this.publisher.publish(roomCode, {
       event: 'room.started',
-      payload: { room, players: start.players.map(toRoomPlayer) }
+      payload: {
+        room: toSanitizedRoom(start.room),
+        players: start.players.map(toRoomPlayer)
+      }
     });
     await this.publishHands(start);
     const round = await this.rounds.startFirstRound(
