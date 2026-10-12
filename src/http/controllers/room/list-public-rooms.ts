@@ -1,11 +1,12 @@
 import type { App } from '@/app';
-import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import type { GameModules } from '@/composition/game-modules';
 import { listPublicRoomsResponse } from '@/contracts';
+import { ensureAuth } from '@/plugins/ensure-auth';
 
-export const listPublicController = async (app: App) => {
-  const roomService = RoomServiceFactory();
-
+export const listPublicController = async (
+  app: App,
+  { roomView }: GameModules
+) => {
   app.register(ensureAuth).get(
     '/list',
     {
@@ -18,10 +19,6 @@ export const listPublicController = async (app: App) => {
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async () => {
-      const publicRooms = await roomService.listPublicRooms();
-
-      return publicRooms;
-    }
+    async () => roomView.publicRooms()
   );
 };

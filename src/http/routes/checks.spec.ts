@@ -43,10 +43,8 @@ describe('readiness outage logging', () => {
     }).withTypeProvider<ZodTypeProvider>();
     app.setValidatorCompiler(validatorCompiler);
     app.setSerializerCompiler(serializerCompiler);
-    app.decorate('db', postgres as unknown as typeof app.db);
-    app.decorate('redis', redis as unknown as typeof app.redis);
     installHttpObservability(app);
-    app.register(checkRoutes);
+    app.register(checkRoutes, { probes: { postgres, redis } });
     try {
       expect((await app.inject('/readyz')).statusCode).toBe(200);
       expect(output.lines).toHaveLength(0);

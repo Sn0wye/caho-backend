@@ -1,13 +1,13 @@
 import type { App } from '@/app';
-import { NotFoundError } from '@/errors';
+import type { GameModules } from '@/composition/game-modules';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { CardServiceFactory } from '@/services/CardServiceFactory';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { drawnBlackCard } from '@/schemas';
 import { z } from 'zod';
 
-export const getRoomBlackCardController = async (app: App) => {
-  const roomService = RoomServiceFactory();
-
+export const getRoomBlackCardController = async (
+  app: App,
+  { roomView }: GameModules
+) => {
   app.register(ensureAuth).get(
     '/:roomCode/black-card',
     {
@@ -17,27 +17,12 @@ export const getRoomBlackCardController = async (app: App) => {
         params: z.object({
           roomCode: z.string().min(6).max(6)
         }),
+        response: {
+          200: drawnBlackCard.nullable()
+        },
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async (req, _res) => {
-      const { roomCode } = req.params;
-
-      const cardService = CardServiceFactory(roomCode);
-
-      const blackCardId = await roomService.getRoomBlackCardId(roomCode);
-
-      if (!blackCardId) {
-        return null;
-      }
-
-      const blackCard = await cardService.getBlackCardById(blackCardId);
-
-      if (!blackCard) {
-        throw new NotFoundError('Carta preta não encontrada');
-      }
-
-      return blackCard;
-    }
+    async req => roomView.blackCard(req.params.roomCode, req.getUser().id)
   );
 };

@@ -29,7 +29,8 @@ const telemetry = buildTelemetry(
 async function bootServer(): Promise<void> {
   telemetry?.start();
   // Dynamic imports keep pg/ioredis unloaded until instrumentation is registered.
-  const { app } = await import('./app');
+  const { buildProductionApp } = await import('./composition/production');
+  const app = buildProductionApp();
   const { postgresPool } = await import('./db');
   const { redis } = await import('./db/redis');
   await runServer({

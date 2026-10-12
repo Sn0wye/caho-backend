@@ -1,9 +1,12 @@
 import type { App } from '@/app';
+import type { AuthService } from '@/services/auth/AuthService';
 import { UnauthorizedError } from '@/errors';
-import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 import { z } from 'zod';
 
-export const signOutController = async (app: App) => {
+export const signOutController = async (
+  app: App,
+  { auth: authService }: { auth: Pick<AuthService, 'signOut'> }
+) => {
   app.post(
     '/sign-out',
     {
@@ -17,7 +20,6 @@ export const signOutController = async (app: App) => {
     },
     async (req, res) => {
       try {
-        const authService = AuthServiceFactory();
 
         const session = req.getSession();
 

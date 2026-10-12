@@ -1,11 +1,12 @@
 import type { App } from '@/app';
+import type { AuthModules } from '@/http/routes/auth';
 import { BadRequestError } from '@/errors';
-import { AuthServiceFactory } from '@/services/auth/AuthServiceFactory';
 import { z } from 'zod';
 
-export const signInWithGithub = async (app: App) => {
-  const authService = AuthServiceFactory();
-
+export const signInWithGithub = async (
+  app: App,
+  { auth: authService }: Pick<AuthModules, 'auth'>
+) => {
   app.get(
     '/github',
     {

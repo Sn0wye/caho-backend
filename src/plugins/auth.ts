@@ -5,14 +5,18 @@ import {
 } from '@/auth/session-cookie';
 import type { Session, SessionUser } from '@/auth/session-types';
 import { UnauthorizedError } from '@/errors';
-import { SessionServiceFactory } from '@/services/auth/SessionServiceFactory';
+import type { SessionService } from '@/services/auth/SessionService';
 import type { FastifyInstance } from 'fastify';
 import { fastifyPlugin } from 'fastify-plugin';
 
-export const authPlugin = fastifyPlugin(
-  async (app: FastifyInstance) => {
-    const sessionService = SessionServiceFactory();
+// Resolves a session token to its User; SessionService in production.
+export type SessionValidator = Pick<SessionService, 'validateSessionToken'>;
 
+export const authPlugin = fastifyPlugin(
+  async (
+    app: FastifyInstance,
+    { sessions: sessionService }: { sessions: SessionValidator }
+  ) => {
     app.addHook('preHandler', async (req, res) => {
       const token =
         readSessionCookie(req.headers.cookie ?? '') ??

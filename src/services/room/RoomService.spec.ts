@@ -259,27 +259,3 @@ describe('RoomService.handleHostLoss', () => {
     expect(room.status).toBe('IN_PROGRESS');
   });
 });
-
-describe('RoomService.getActiveRound', () => {
-  it('returns the Round matching the Room current round number', async () => {
-    const { service } = await buildService({
-      room: makeRoom({ round: 2 }),
-      players: [makePlayer({ id: 'player-judge', isJudge: true })],
-      rounds: [makeRound({ roundNumber: 1 }), makeRound({ id: 'round-2', roundNumber: 2 })],
-    });
-
-    const round = await service.getActiveRound(ROOM_CODE);
-
-    expect(round?.id).toBe('round-2');
-  });
-
-  it('returns null when no Round matches the current round number', async () => {
-    const { service } = await buildService({
-      room: makeRoom({ round: 9 }),
-      players: [makePlayer({ id: 'player-judge', isJudge: true })],
-      rounds: [makeRound({ roundNumber: 1 })],
-    });
-
-    expect(await service.getActiveRound(ROOM_CODE)).toBeNull();
-  });
-});

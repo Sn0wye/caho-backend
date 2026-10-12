@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ROOM_CODE,
   buildService,
-  makePlayedCards,
   makePlayer,
   makeRoom,
   makeRound
@@ -138,35 +137,5 @@ describe('RoomService.joinRoom', () => {
     await expect(
       service.joinRoom({ roomCode: ROOM_CODE, password: null, player: makePlayer() })
     ).rejects.toThrow(BadRequestError);
-  });
-});
-
-describe('RoomService.getRoundSnapshot', () => {
-  it('hides Played Cards until the Round reaches judging', async () => {
-    const { service } = await buildService({
-      room: makeRoom(),
-      players: [judge(), makePlayer({ id: 'player-a' })],
-      rounds: [makeRound({ status: 'PLAYING' })],
-      playedCards: [makePlayedCards('player-a')]
-    });
-
-    const snapshot = await service.getRoundSnapshot(ROOM_CODE);
-
-    expect(snapshot).toEqual(
-      expect.objectContaining({ roundNumber: 1, status: 'PLAYING', roundPlayedCards: [] })
-    );
-  });
-
-  it('reveals Played Cards during judging', async () => {
-    const { service } = await buildService({
-      room: makeRoom(),
-      players: [judge(), makePlayer({ id: 'player-a' })],
-      rounds: [makeRound({ status: 'JUDGING' })],
-      playedCards: [makePlayedCards('player-a')]
-    });
-
-    const snapshot = await service.getRoundSnapshot(ROOM_CODE);
-
-    expect(snapshot?.roundPlayedCards).toHaveLength(1);
   });
 });

@@ -63,6 +63,23 @@ function whiteCardPool(
 }
 
 /**
+ * A freshly seeded InMemoryGameStore whose card pool covers every seeded card.
+ *
+ * @example
+ * const store = await buildStore({ room: makeRoom(), players: [makePlayer()] });
+ */
+export async function buildStore(
+  seed: GameSeed & { blackCards?: BlackCard[] }
+): Promise<InMemoryGameStore> {
+  const store = new InMemoryGameStore({
+    whiteCards: whiteCardPool(seed.players ?? [], seed.playedCards ?? []),
+    blackCards: seed.blackCards ?? DEFAULT_BLACK_CARDS
+  });
+  await seedGame(store, seed);
+  return store;
+}
+
+/**
  * The real RoomService over a freshly seeded InMemoryGameStore.
  *
  * @example
@@ -71,12 +88,7 @@ function whiteCardPool(
 export async function buildService(
   seed: GameSeed & { blackCards?: BlackCard[] }
 ): Promise<{ service: RoomService; store: InMemoryGameStore }> {
-  const store = new InMemoryGameStore({
-    whiteCards: whiteCardPool(seed.players ?? [], seed.playedCards ?? []),
-    blackCards: seed.blackCards ?? DEFAULT_BLACK_CARDS
-  });
-  await seedGame(store, seed);
-
+  const store = await buildStore(seed);
   const service = new RoomService(
     store,
     new WhiteCardDealer(store),

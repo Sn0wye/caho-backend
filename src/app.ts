@@ -1,4 +1,3 @@
-import { redis } from '@/db/redis';
 import { env } from '@/env';
 import { fastifyCookie } from '@fastify/cookie';
 import { fastifyCors } from '@fastify/cors';
@@ -20,21 +19,19 @@ import {
   serializerCompiler,
   validatorCompiler
 } from 'fastify-type-provider-zod';
-import { db } from './db';
+import type { Logger } from 'pino';
+import type { GameModules } from './composition/game-modules';
 import { fastifyErrorHandler } from './http/error-handler';
 import { installHttpObservability } from './http/request-observability';
 import { authRoutes } from './http/routes/auth';
-import { checkRoutes } from './http/routes/checks';
+import { type ReadinessProbes, checkRoutes } from './http/routes/checks';
 import { pingRoute } from './http/routes/ping';
 import { roomRoutes } from './http/routes/room';
 import { wsRoutes } from './http/routes/ws';
-import { logger } from './lib/logger';
-import { Pubsub } from './lib/pub-sub';
-import { traceBackground } from './lib/tracing';
-import { authPlugin } from './plugins/auth';
-import { RoundLifecycleFactory } from './services/round/RoundLifecycleFactory';
-import { ensureExpiryNotifications } from './services/round/ensureExpiryNotifications';
-import { subscribeRoundExpiry } from './services/round/subscribeRoundExpiry';
+import { type SessionValidator, authPlugin } from './plugins/auth';
+import type { IUserRepository } from './repositories/user/IUserRepository';
+import type { IGameEventSubscriber } from './services/IGameEventSubscriber';
+import type { AuthService } from './services/auth/AuthService';
 
 // import { csrfPlugin } from './plugins/csrf';
 
@@ -46,108 +43,101 @@ export type App = FastifyInstance<
   ZodTypeProvider
 >;
 
-export const app: App = fastify({
-  logger: logger as FastifyBaseLogger,
-  disableRequestLogging: true,
-  // Do not accept arbitrary client request IDs as log properties.
-  requestIdHeader: false
-}).withTypeProvider<ZodTypeProvider>();
+// Everything the routes call, built once by the caller and passed in as plugin
+// options. Production builds it over Postgres + Redis (composition/production);
+// specs build it over in-memory adapters (app.fakes). issue #26.
+export type AppModules = GameModules & {
+  subscriber: IGameEventSubscriber;
+  sessions: SessionValidator;
+  auth: AuthService;
+  users: IUserRepository;
+  readiness: ReadinessProbes;
+  logger: Logger;
+};
 
-installHttpObservability(app);
+/**
+ * The HTTP + WS app over the given modules. Controllers no longer build their
+ * own dependencies, so a spec swaps an adapter without `vi.mock`.
+ *
+ * @example
+ * const app = buildApp(modules);
+ * await app.inject({ url: '/rooms/ABC123/players', headers });
+ */
+export function buildApp(modules: AppModules): App {
+  const app = fastify({
+    logger: modules.logger as FastifyBaseLogger,
+    disableRequestLogging: true,
+    // Do not accept arbitrary client request IDs as log properties.
+    requestIdHeader: false
+  }).withTypeProvider<ZodTypeProvider>();
 
-// Round timer engine (ADR-0003 / issue #4): on boot, sweep any Round whose
-// deadline lapsed while the process was down, then subscribe to Redis expired-key
-// events to advance Rounds live. The sweep runs before the subscriber so a missed
-// event and a fresh event can't race. Skipped under test (no live Redis).
-let unsubscribeRoundExpiry: (() => Promise<void>) | null = null;
-if (env.NODE_ENV !== 'test') {
-  app.addHook('onReady', async () => {
-    const rounds = RoundLifecycleFactory();
-    await ensureExpiryNotifications(redis, logger);
-    await traceBackground('round.reconcile', {}, () => rounds.reconcile());
-    unsubscribeRoundExpiry = await subscribeRoundExpiry(
-      redis,
-      rounds,
-      logger,
-      redis.options.db ?? 0
-    );
+  installHttpObservability(app);
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+  app.setErrorHandler(fastifyErrorHandler);
+  registerDocs(app);
+  registerPlugins(app, modules);
+  registerRoutes(app, modules);
+  return app;
+}
+
+function registerDocs(app: App): void {
+  app.register(fastifySwagger, {
+    openapi: {
+      info: {
+        title: 'CAHO API',
+        description: 'Caho game API',
+        version: '1.0.0'
+      },
+      components: {
+        securitySchemes: {
+          cookieAuth: {
+            type: 'apiKey',
+            description: 'Session cookie (auto-set)',
+            in: 'cookie',
+            name: 'auth_session'
+          },
+          bearerAuth: {
+            type: 'http',
+            description: 'Bearer token',
+            scheme: 'bearer',
+            bearerFormat: 'JWT'
+          }
+        }
+      }
+    },
+    transform: jsonSchemaTransform
+  });
+  app.register(fastifySwaggerUi, {
+    routePrefix: '/docs'
   });
 }
 
-app.addHook('onClose', async () => {
-  await unsubscribeRoundExpiry?.();
-});
+function registerPlugins(app: App, modules: AppModules): void {
+  app.register(fastifyCors, {
+    origin:
+      env.NODE_ENV === 'production'
+        ? ['https://caho.com.br']
+        : ['http://localhost:3000'],
+    credentials: true
+  });
+  app.register(fastifyWebsocket);
+  app.register(fastifySensible);
+  app.register(fastifyCookie, {
+    secret: env.COOKIE_SECRET,
+    hook: 'onRequest',
+    parseOptions: {}
+  });
+  // app.register(csrfPlugin, {
+  //   enabled: env.NODE_ENV === 'production'
+  // });
+  app.register(authPlugin, { sessions: modules.sessions });
+}
 
-app.setValidatorCompiler(validatorCompiler);
-app.setSerializerCompiler(serializerCompiler);
-
-app.register(fastifySwagger, {
-  openapi: {
-    info: {
-      title: 'CAHO API',
-      description: 'Caho game API',
-      version: '1.0.0'
-    },
-    components: {
-      securitySchemes: {
-        cookieAuth: {
-          type: 'apiKey',
-          description: 'Session cookie (auto-set)',
-          in: 'cookie',
-          name: 'auth_session'
-        },
-        bearerAuth: {
-          type: 'http',
-          description: 'Bearer token',
-          scheme: 'bearer',
-          bearerFormat: 'JWT'
-        }
-      }
-    }
-  },
-  transform: jsonSchemaTransform
-});
-
-app.setErrorHandler(fastifyErrorHandler);
-
-app.register(fastifySwaggerUi, {
-  routePrefix: '/docs'
-});
-
-// decorators
-app.decorate('db', db);
-app.decorate('redis', redis);
-app.decorate('pubsub', new Pubsub(redis, logger));
-
-// plugins
-app.register(fastifyCors, {
-  origin:
-    env.NODE_ENV === 'production'
-      ? ['https://caho.com.br']
-      : ['http://localhost:3000'],
-  credentials: true
-});
-app.register(fastifyWebsocket);
-app.register(fastifySensible);
-app.register(fastifyCookie, {
-  secret: env.COOKIE_SECRET,
-  hook: 'onRequest',
-  parseOptions: {}
-});
-// app.register(csrfPlugin, {
-//   enabled: env.NODE_ENV === 'production'
-// });
-app.register(authPlugin);
-
-// routes
-app.register(authRoutes, {
-  prefix: '/auth'
-});
-app.register(roomRoutes, {
-  prefix: '/rooms'
-});
-app.register(checkRoutes);
-app.register(pingRoute);
-app.register(wsRoutes, {
-  prefix: '/ws'
-});
+function registerRoutes(app: App, modules: AppModules): void {
+  app.register(authRoutes, { prefix: '/auth', ...modules });
+  app.register(roomRoutes, { prefix: '/rooms', ...modules });
+  app.register(checkRoutes, { probes: modules.readiness });
+  app.register(pingRoute);
+  app.register(wsRoutes, { prefix: '/ws', ...modules });
+}

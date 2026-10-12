@@ -1,44 +1,29 @@
 import type { App } from '@/app';
-import { ForbiddenError } from '@/errors';
+import type { GameModules } from '@/composition/game-modules';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoomServiceFactory } from '@/services/room/RoomServiceFactory';
+import { roundPlayedCardsSchema } from '@/schemas';
 import { z } from 'zod';
 
-export const getRoundPlayedCardsController = async (app: App) => {
-  const roomService = RoomServiceFactory();
-
+// Empty for everyone, the Judge included, until the Round reaches judging.
+export const getRoundPlayedCardsController = async (
+  app: App,
+  { roomView }: GameModules
+) => {
   app.register(ensureAuth).get(
     '/:roomCode/round-played-cards',
     {
       schema: {
         tags: ['Rooms'],
-        description: 'Get Round played cards as a Judge',
+        description: 'Get the current Round played cards once judging opens',
         params: z.object({
           roomCode: z.string().min(6).max(6)
         }),
+        response: {
+          200: z.array(roundPlayedCardsSchema)
+        },
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async req => {
-      const { roomCode } = req.params;
-      const user = req.getUser();
-
-      const player = await roomService.getPlayerFromRoom(roomCode, user.id);
-
-      if (!player.isJudge) {
-        throw new ForbiddenError(
-          'Você não é o juiz desta rodada, não pode ver as cartas jogadas.'
-        );
-      }
-
-      const room = await roomService.getRoom(roomCode);
-
-      const roundPlayedCards = await roomService.getRoundPlayedCards(
-        roomCode,
-        room.round
-      );
-
-      return roundPlayedCards;
-    }
+    async req => roomView.playedCards(req.params.roomCode, req.getUser().id)
   );
 };

@@ -12,7 +12,6 @@ import { ROOM_ERRORS } from '@/errors/room';
 import type { IGameStore } from '@/repositories/game-store/IGameStore';
 import type {
   Player,
-  PublicRoomWithPlayerCountAndHost,
   Ranking,
   Room,
   Round,
@@ -32,8 +31,7 @@ import type {
   JudgeChooseWinnerDTO,
   JudgePick,
   PlayResult,
-  RoundScore,
-  RoundSnapshot
+  RoundScore
 } from './IRoomService';
 import type { IWhiteCardDealer } from './IWhiteCardDealer';
 import { HAND_SIZE, assertRoomCanStart } from './gameRules';
@@ -80,10 +78,6 @@ export class RoomService implements IRoomService {
     } catch (error) {
       throw new InternalServerError('Erro ao criar sala.', { cause: error });
     }
-  }
-
-  public async listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]> {
-    return await this.store.rooms.listPublicRooms();
   }
 
   public async addPlayerToRoom({
@@ -330,24 +324,6 @@ export class RoomService implements IRoomService {
     });
   }
 
-  public async getRoomPlayers(roomCode: string): Promise<Player[]> {
-    await this.getRoom(roomCode);
-
-    try {
-      const players = await this.store.players.getRoomPlayersByCode(roomCode);
-      return players;
-    } catch (error) {
-      throw new InternalServerError('Erro ao buscar jogadores da sala.', {
-        cause: error
-      });
-    }
-  }
-
-  public async getRoomBlackCardId(roomCode: string): Promise<string | null> {
-    const room = await this.getRoom(roomCode);
-    return room.currentBlackCardId;
-  }
-
   public async updatePlayerInRoom(
     roomCode: string,
     playerId: string,
@@ -365,7 +341,7 @@ export class RoomService implements IRoomService {
     return await this.getPlayerFromRoom(roomCode, playerId);
   }
 
-  public async getPlayerFromRoom(
+  private async getPlayerFromRoom(
     roomCode: string,
     playerId: string
   ): Promise<Player> {
@@ -395,35 +371,6 @@ export class RoomService implements IRoomService {
         { cause: error }
       );
     }
-  }
-
-  public async updateRoom(
-    roomCode: string,
-    data: Partial<Room>
-  ): Promise<Room> {
-    try {
-      return await this.store.rooms.update(roomCode, data);
-    } catch (error) {
-      throw new InternalServerError('Erro ao atualizar sala.', {
-        cause: error
-      });
-    }
-  }
-
-  public async getCurrentWhiteCards(
-    roomCode: string,
-    playerId: string
-  ): Promise<WhiteCard[]> {
-    await this.getRoom(roomCode);
-    const player = await this.getPlayerFromRoom(roomCode, playerId);
-
-    // Resolve the player's Hand (stored as ids) against the store's card pool.
-    // See issue #5 (cards moved to the database).
-    const hand = await Promise.all(
-      player.cardIds.map(id => this.store.cards.findWhiteCardById(id))
-    );
-
-    return hand.filter((card): card is WhiteCard => card !== undefined);
   }
 
   // A Player submits their answer. The rules (phase, not the Judge, one play per
@@ -510,63 +457,6 @@ export class RoomService implements IRoomService {
     }
   }
 
-  public async getRoundPlayedCards(
-    roomCode: string,
-    roundNumber: number
-  ): Promise<RoundPlayedCard[]> {
-    const roundPlayedCards =
-      await this.store.playedCards.findByRoomCodeAndRoundNumber(
-        roomCode,
-        roundNumber
-      );
-
-    return roundPlayedCards;
-  }
-
-  // The Round currently in play for a Room (its round number lives on the Room).
-  // Drives presence-driven Judge-loss: a drop arms the judge-grace timer on this
-  // Round, an explicit Judge leave aborts it. See ADR-0002/0003, issue #4.
-  public async getActiveRound(roomCode: string): Promise<Round | null> {
-    const room = await this.getRoom(roomCode);
-    return await this.store.rounds.find(roomCode, room.round);
-  }
-
-  // Everything a (re)connecting client needs to render the current Round, since
-  // WS events are only live deltas. Played Cards are hidden until judging, when
-  // `room.time-to-judge` reveals them to the whole Room anyway.
-  public async getRoundSnapshot(
-    roomCode: string
-  ): Promise<RoundSnapshot | null> {
-    const round = await this.getActiveRound(roomCode);
-    if (!round) {
-      return null;
-    }
-
-    const blackCard = await this.blackCardDeck.findBlackCard(
-      roomCode,
-      round.blackCardId
-    );
-    const revealed = round.status === 'JUDGING' || round.status === 'COMPLETE';
-    const roundPlayedCards = revealed
-      ? await this.getRoundPlayedCards(roomCode, round.roundNumber)
-      : [];
-
-    return {
-      roundNumber: round.roundNumber,
-      status: round.status,
-      judgeId: round.judgeId,
-      playDeadline: round.playDeadline,
-      judgeDeadline: round.judgeDeadline,
-      blackCard: blackCard ?? null,
-      roundPlayedCards
-    };
-  }
-
-  public async getRoundNumber(roomCode: string): Promise<number> {
-    const room = await this.getRoom(roomCode);
-    return room.round;
-  }
-
   // The Judge's pick is valid: only the Room's Judge, only while the Round is
   // JUDGING, only a Player who played. Returns the Round and the winning Played
   // Card; RoundLifecycle then claims JUDGING -> COMPLETE, which guards a
@@ -616,7 +506,7 @@ export class RoomService implements IRoomService {
       );
     }
 
-    const plays = await this.getRoundPlayedCards(
+    const plays = await this.store.playedCards.findByRoomCodeAndRoundNumber(
       round.roomCode,
       round.roundNumber
     );
@@ -643,7 +533,7 @@ export class RoomService implements IRoomService {
     roomCode: string;
     cardsPerPlayer: number;
   }): Promise<DealtHand[]> {
-    const players = await this.getRoomPlayers(roomCode);
+    const players = await this.store.players.getRoomPlayersByCode(roomCode);
     const result: DealtHand[] = [];
 
     for (const player of players) {

@@ -1,11 +1,12 @@
 import type { App } from '@/app';
+import type { GameModules } from '@/composition/game-modules';
 import { ensureAuth } from '@/plugins/ensure-auth';
-import { RoundLifecycleFactory } from '@/services/round/RoundLifecycleFactory';
 import { z } from 'zod';
 
-export const judgeChooseWinner = async (app: App) => {
-  const rounds = RoundLifecycleFactory();
-
+export const judgeChooseWinner = async (
+  app: App,
+  { rounds }: GameModules
+) => {
   app.register(ensureAuth).post(
     '/:roomCode/winner',
     {
