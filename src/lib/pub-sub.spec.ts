@@ -38,7 +38,30 @@ describe('CAHO Pub/Sub namespace', () => {
     expect(received).toHaveBeenCalledWith(event);
     await unsubscribe();
     expect(connection.unsubscribed).toEqual(['caho:ABC123']);
+    await pubsub.close();
     expect(connection.closed).toBe(true);
+  });
+
+  // issue #26: one subscriber connection per app, not one per socket.
+  it('shares one subscriber connection and unsubscribes a channel after its last receiver', async () => {
+    const redis = new FakeRedisPubsub();
+    const pubsub = new Pubsub(redis as unknown as Redis);
+    const first = vi.fn();
+    const second = vi.fn();
+    const stopFirst = await pubsub.subscribe('ABC123', first);
+    const stopSecond = await pubsub.subscribe('ABC123', second);
+    const stopOther = await pubsub.subscribe('player-a', vi.fn());
+    const [connection] = redis.connections;
+    expect(redis.connections).toHaveLength(1);
+    expect(connection.subscribed).toEqual(['caho:ABC123', 'caho:player-a']);
+    connection.emit('message', 'caho:ABC123', JSON.stringify(event));
+    await vi.waitFor(() => expect(second).toHaveBeenCalledWith(event));
+    expect(first).toHaveBeenCalledWith(event);
+    await stopFirst();
+    expect(connection.unsubscribed).toEqual([]);
+    await stopSecond();
+    await stopOther();
+    expect(connection.unsubscribed).toEqual(['caho:ABC123', 'caho:player-a']);
   });
 });
 
@@ -90,7 +113,7 @@ describe('Pub/Sub observability', () => {
     await unsubscribe();
   });
 
-  it('logs publishing and subscribe failures and closes failed subscriptions', async () => {
+  it('logs publishing and subscribe failures', async () => {
     const redis = new FakeRedisPubsub();
     redis.publishError = new Error('publish failed');
     redis.subscribeError = new Error('subscribe failed');
@@ -103,19 +126,19 @@ describe('Pub/Sub observability', () => {
     await expect(pubsub.subscribe('ABC123', () => {})).rejects.toThrow(
       'subscribe failed'
     );
-    expect(redis.connections[0].closed).toBe(true);
     expect(output.lines.map(line => JSON.parse(line).event)).toEqual([
       'pubsub.publish_failed',
       'redis.subscription_failed'
     ]);
   });
 
-  it('quits a subscriber even when unsubscribe fails', async () => {
+  it('still quits the shared subscriber after an unsubscribe fails', async () => {
     const redis = new FakeRedisPubsub();
     redis.unsubscribeError = new Error('unsubscribe failed');
     const pubsub = new Pubsub(redis as unknown as Redis);
     const unsubscribe = await pubsub.subscribe('ABC123', () => {});
     await expect(unsubscribe()).rejects.toThrow('unsubscribe failed');
+    await pubsub.close();
     expect(redis.connections[0].closed).toBe(true);
   });
 });

@@ -1,6 +1,8 @@
-import type { UpdateProfileRequest } from '@/contracts/update-profile';
+import {
+  type UpdateProfileRequest,
+  profileConflictMessage
+} from '@/contracts/update-profile';
 import { BadRequestError } from '@/errors';
-import { profileConflictMessage } from '@/repositories/user/UserRepository';
 import type { IUserRepository } from '@/repositories/user/IUserRepository';
 import type { Profile, UserSchema } from '@/schemas';
 

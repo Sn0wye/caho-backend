@@ -42,6 +42,7 @@ export function buildProductionApp(): App {
     readiness: { postgres: db, redis },
     logger
   });
+  app.addHook('onClose', () => pubsub.close());
   installRoundTimers(app, game.rounds);
   return app;
 }

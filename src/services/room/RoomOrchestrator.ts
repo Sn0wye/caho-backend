@@ -1,14 +1,13 @@
 import type { CreateRoom } from '@/contracts';
 import { BadRequestError } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
-import { toRoomPlayer } from '@/schemas';
 import type { Ranking, Room, SanitizedRoom } from '@/schemas';
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
 import type { RoundLifecycle } from '@/services/round/RoundLifecycle';
 import type { Logger } from 'pino';
 import type { IRoomOrchestratorService } from './IRoomOrchestratorService';
 import type { GameStart } from './IRoomService';
-import { toSanitizedRoom } from './RoomView';
+import { toRoomPlayer, toSanitizedRoom } from './RoomView';
 import { HAND_SIZE } from './gameRules';
 import { type PlayerProfile, playerFromUser } from './playerFromUser';
 

@@ -9,22 +9,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkRoutes } from './checks';
-
-class FakeReadinessPostgres {
-  available = true;
-  async execute(_statement: unknown): Promise<unknown[]> {
-    if (!this.available) throw new Error('PostgreSQL unavailable');
-    return [];
-  }
-}
-
-class FakeReadinessRedis {
-  available = true;
-  async ping(): Promise<string> {
-    if (!this.available) throw new Error('Redis unavailable');
-    return 'PONG';
-  }
-}
+import { FakeReadinessPostgres, FakeReadinessRedis } from './checks.fakes';
 
 afterEach(() => {
   vi.useRealTimers();

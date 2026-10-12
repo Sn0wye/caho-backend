@@ -1,6 +1,9 @@
 import { db } from '@/db';
 import { users } from '@/db/schema';
-import type { UpdateProfileRequest } from '@/contracts/update-profile';
+import {
+  type UpdateProfileRequest,
+  profileConflictMessage
+} from '@/contracts/update-profile';
 import { BadRequestError } from '@/errors';
 import type { Profile, UserSchema } from '@/schemas';
 import { and, eq, ne, or } from 'drizzle-orm';
@@ -21,14 +24,7 @@ export class UserRepository implements IUserRepository {
     profile: UpdateProfileRequest
   ): Promise<Profile> {
     const { username, email, avatarUrl } = profile;
-    const taken = await db.query.users.findFirst({
-      where: and(
-        ne(users.id, userId),
-        email
-          ? or(eq(users.username, username), eq(users.email, email))
-          : eq(users.username, username)
-      )
-    });
+    const taken = await this.findProfileConflict(userId, profile);
     if (taken) {
       throw new BadRequestError(profileConflictMessage(taken, username));
     }
@@ -46,20 +42,19 @@ export class UserRepository implements IUserRepository {
       });
     return updated;
   }
-}
 
-/**
- * The conflict a profile update hit: the username if that is what's taken,
- * otherwise the email.
- *
- * @example
- * profileConflictMessage(existing, 'neo'); // 'Esse nome de usuário já está em uso.'
- */
-export function profileConflictMessage(
-  taken: Pick<UserSchema, 'username'>,
-  username: string
-): string {
-  return taken.username === username
-    ? 'Esse nome de usuário já está em uso.'
-    : 'Esse email já está em uso.';
+  // Another User already holding the username, or the email when one is set.
+  private async findProfileConflict(
+    userId: string,
+    { username, email }: UpdateProfileRequest
+  ): Promise<UserSchema | undefined> {
+    return await db.query.users.findFirst({
+      where: and(
+        ne(users.id, userId),
+        email
+          ? or(eq(users.username, username), eq(users.email, email))
+          : eq(users.username, username)
+      )
+    });
+  }
 }

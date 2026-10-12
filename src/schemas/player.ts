@@ -21,14 +21,11 @@ export type Player = z.infer<typeof playerSchema>;
 // the derived `isJudge` flag — the frontend computes `isJudge = id === judgeId`
 // from `room.round-start`, so `isJudge` carries no authoritative truth here.
 // Every room.* player payload uses this view; the Hand travels only on the
-// private Player channel via `player.cards-drawn`. See ADR-0005.
+// private Player channel via `player.cards-drawn`. See ADR-0005. The
+// projection, toRoomPlayer, lives in RoomView with every other view (#26).
 export const roomPlayerSchema = playerSchema.omit({
   cardIds: true,
   isJudge: true
 });
 
 export type RoomPlayer = z.infer<typeof roomPlayerSchema>;
-
-// Strip the private/derived fields off a Player for a room-channel broadcast.
-export const toRoomPlayer = ({ cardIds, isJudge, ...rest }: Player): RoomPlayer =>
-  rest;

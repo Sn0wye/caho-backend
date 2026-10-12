@@ -2,7 +2,6 @@ import { ForbiddenError, NotFoundError } from '@/errors';
 import { ROOM_ERRORS } from '@/errors/room';
 import type { BlackCard } from '@/repositories/cards';
 import type { IGameStore } from '@/repositories/game-store/IGameStore';
-import { toRoomPlayer } from '@/schemas';
 import type {
   Player,
   PublicRoomWithPlayerCountAndHost,
@@ -22,6 +21,18 @@ import type { IBlackCardDeck } from './IBlackCardDeck';
 // same moment. The played-cards endpoint used to show them to the Judge during
 // PLAYING. issue #26.
 const REVEALED_PHASES: Round['status'][] = ['JUDGING', 'COMPLETE'];
+
+/**
+ * Strip the private Hand and the derived isJudge off a Player: the only Player
+ * shape REST reads and room.* broadcasts send (ADR-0005). Moved from
+ * `@/schemas` so every visibility rule lives here. issue #26.
+ *
+ * @example
+ * publish(roomCode, { event: 'room.player-update', payload: toRoomPlayer(player) });
+ */
+export function toRoomPlayer({ cardIds: _cardIds, isJudge: _isJudge, ...player }: Player): RoomPlayer {
+  return player;
+}
 
 /**
  * Strip the password off a Room. The only place it is removed, shared by every
@@ -69,7 +80,8 @@ export class RoomView {
     return players.map(toRoomPlayer);
   }
 
-  // Only the viewer's own Hand, resolved from stored ids against the card pool.
+  // Only the viewer's own Hand, resolved from stored ids against the store's
+  // card pool. See issue #5 (cards moved to the database).
   public async hand(roomCode: string, viewerId: string): Promise<WhiteCard[]> {
     await this.requireRoom(roomCode);
     const viewer = await this.requireMember(roomCode, viewerId);

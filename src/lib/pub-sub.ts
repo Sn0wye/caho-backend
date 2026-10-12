@@ -4,12 +4,19 @@ import { traceOperation } from '@/lib/tracing';
 import { ROOT_CONTEXT, context, propagation } from '@opentelemetry/api';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
-import { openRedisSubscription } from './redis-events';
+import { observeRedis } from './redis-events';
 
 type Event = RoomEvent | PlayerEvent;
 type TracedEvent = Event & { __cahoTrace?: Record<string, string> };
+type ChannelSubscription = {
+  receivers: Set<(event: Event) => void>;
+  ready: Promise<void>;
+};
 
 export class Pubsub {
+  private subscriber?: Redis;
+  private readonly channels = new Map<string, ChannelSubscription>();
+
   constructor(
     private readonly redis: Redis,
     private readonly log?: Logger
@@ -50,13 +57,67 @@ export class Pubsub {
     channel: string,
     cb: (event: Event) => void
   ): Promise<() => Promise<void>> {
-    const sub = this.redis.duplicate();
     const redisChannel = `${CAHO_REDIS_PREFIX}${channel}`;
-    sub.on('message', (receivedChannel: string, message: string) => {
-      if (receivedChannel !== redisChannel) return;
-      void this.deliver(channel, message, cb);
+    const subscription =
+      this.channels.get(redisChannel) ?? this.openChannel(redisChannel);
+    await subscription.ready;
+    subscription.receivers.add(cb);
+    return () => this.release(redisChannel, subscription, cb);
+  }
+
+  /** Quit the shared subscriber connection. Example: app.addHook('onClose', () => pubsub.close()). */
+  public async close(): Promise<void> {
+    this.channels.clear();
+    await this.subscriber?.quit();
+  }
+
+  // Every socket used to duplicate its own Redis connection; now one shared
+  // subscriber carries every channel and fans messages out here. issue #26.
+  private sharedSubscriber(): Redis {
+    if (this.subscriber) return this.subscriber;
+    const sub = this.redis.duplicate();
+    if (this.log) observeRedis(sub, this.log, 'pubsub');
+    sub.on('message', (redisChannel: string, message: string) => {
+      const subscription = this.channels.get(redisChannel);
+      const channel = redisChannel.slice(CAHO_REDIS_PREFIX.length);
+      for (const cb of subscription?.receivers ?? []) {
+        void this.deliver(channel, message, cb);
+      }
     });
-    return openRedisSubscription(sub, redisChannel, this.log);
+    this.subscriber = sub;
+    return sub;
+  }
+
+  // Concurrent subscribers to a new channel share one SUBSCRIBE round trip.
+  private openChannel(redisChannel: string): ChannelSubscription {
+    const subscription: ChannelSubscription = {
+      receivers: new Set(),
+      ready: this.sharedSubscriber()
+        .subscribe(redisChannel)
+        .then(() => undefined)
+        .catch(err => {
+          this.channels.delete(redisChannel);
+          this.log?.error(
+            { event: 'redis.subscription_failed', channel: redisChannel, connectionRole: 'pubsub', err },
+            'Redis subscription failed'
+          );
+          throw err;
+        })
+    };
+    this.channels.set(redisChannel, subscription);
+    return subscription;
+  }
+
+  private async release(
+    redisChannel: string,
+    subscription: ChannelSubscription,
+    cb: (event: Event) => void
+  ): Promise<void> {
+    subscription.receivers.delete(cb);
+    if (subscription.receivers.size > 0) return;
+    if (this.channels.get(redisChannel) !== subscription) return;
+    this.channels.delete(redisChannel);
+    await this.subscriber?.unsubscribe(redisChannel);
   }
 
   private async deliver(

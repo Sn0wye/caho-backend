@@ -1,5 +1,6 @@
 import type { SessionUser, SessionValidationResult } from '@/auth/session-types';
 import type { PlayerEvent, RoomEvent } from '@/contracts';
+import { FakeReadinessPostgres, FakeReadinessRedis } from '@/http/routes/checks.fakes';
 import { buildLogger } from '@/lib/logger';
 import { FakeConsoleOutput } from '@/lib/logger.fakes';
 import type { InMemoryGameStore } from '@/repositories/game-store/InMemoryGameStore';
@@ -106,7 +107,7 @@ export async function buildTestApp(seed: GameSeed, userIds: string[] = []): Prom
     sessions: new FakeSessionValidator(sessionUsers),
     auth: new AuthService(users, new SessionService(new FakeSessionRepository(sessionUsers[0]))),
     users,
-    readiness: { postgres: { execute: async () => [] }, redis: { ping: async () => 'PONG' } },
+    readiness: { postgres: new FakeReadinessPostgres(), redis: new FakeReadinessRedis() },
     logger: buildLogger({ consoleOutput: new FakeConsoleOutput() }).logger
   });
   return { app, store, bus, users };
