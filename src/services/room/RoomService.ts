@@ -401,15 +401,17 @@ export class RoomService implements IRoomService {
       whiteCardIds: playedCardIds
     });
 
-    const cardsDrawn = await this.refillHand(roomCode, player, playedCardIds);
+    const hand = await this.refillHand(roomCode, player, playedCardIds);
     return {
       player: await this.getPlayerFromRoom(roomCode, playerId),
-      cardsDrawn
+      hand
     };
   }
 
   // Refill exactly the cards just played so the Hand tops back up to its
   // standing size (10) and persists into the next Round. issue #1, slice 3.
+  // Returns the whole refilled Hand: `player.cards-drawn` replaces the client's
+  // Hand, so sending only the fresh cards would wipe the kept ones.
   private async refillHand(
     roomCode: string,
     player: Player,
@@ -419,15 +421,21 @@ export class RoomService implements IRoomService {
       roomCode,
       playedCardIds.length
     );
-    const cardIds = player.cardIds
-      .filter(cardId => !playedCardIds.includes(cardId))
-      .concat(newWhiteCards.map(card => card.id));
+    const keptCardIds = player.cardIds.filter(
+      cardId => !playedCardIds.includes(cardId)
+    );
+    const keptCards = await Promise.all(
+      keptCardIds.map(id => this.store.cards.findWhiteCardById(id))
+    );
+    const hand = keptCards
+      .filter((card): card is WhiteCard => card !== undefined)
+      .concat(newWhiteCards);
 
     await this.store.players.updatePlayerInRoom(roomCode, player.id, {
-      cardIds,
+      cardIds: hand.map(card => card.id),
       isReady: true
     });
-    return newWhiteCards;
+    return hand;
   }
 
   // The current Round of an in-progress Room, or a 4xx explaining why there is
