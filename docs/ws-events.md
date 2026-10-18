@@ -79,7 +79,7 @@ const isJudge = (player: RoomPlayer) => player.id === currentJudgeId;
 | `room.time-to-judge` | `{ roundNumber: number, roundPlayedCards: RoundPlayedCard[] }` |
 | `room.round-end` | `{ roundNumber, winner: RoundPlayedCard \| null, winnerId: string \| null, newScore: number \| null, reason: 'picked' \| 'aborted' }` |
 | `room.game-end` | `Ranking` |
-| `room.cursor-move` | `{ playerId: string, x: number, y: number }` — table space, see below |
+| `room.cursor-move` | `{ playerId: string, x: number, y: number, card: number \| null }` — table space and hovered Hand slot, see below |
 | `room.cursor-leave` | `{ playerId: string }` |
 
 ### Event reference (player channel)
@@ -145,7 +145,7 @@ The Room socket is the one place the server reads messages from the client
 the Room may send:
 
 ```ts
-{ event: 'cursor.move', payload: { x: number, y: number } }   // x, y in [-2, 2]
+{ event: 'cursor.move', payload: { x: number, y: number, card?: number | null } }   // x, y in [-2, 2]
 { event: 'cursor.hide' }                                        // pointer left the table
 ```
 
@@ -154,6 +154,11 @@ at radius `1`, independent of screen size or the seat a client draws at the
 bottom. The server rebroadcasts each move as `room.cursor-move` to the whole Room
 (sender included, so drop your own `playerId`), keeps nothing, and sends
 `room.cursor-leave` on `cursor.hide` or when the socket closes.
+
+`card` is the slot (0–19) of the Player's own Hand the pointer rests on, or
+`null`/absent when it isn't over the Hand. It is only an index: others use it to
+lift that face-down card in front of the Player's seat, never to learn the card.
+It is rebroadcast as `card` (`null` when absent).
 
 - Send at most every 50ms; the server drops moves closer than 30ms apart.
 - Messages from a signed-in User who isn't in the Room, malformed JSON and the

@@ -28,7 +28,12 @@ export class CursorBroadcaster {
     return roomCodes.includes(roomCode);
   }
 
-  /** Broadcast where the Player's cursor is. Example: move('ABC123', 'player-a', { x: 0, y: 0.5 }). */
+  /**
+   * Broadcast where the Player's cursor is, and which Hand slot it hovers.
+   *
+   * @example
+   * move('ABC123', 'player-a', { x: 0, y: 0.5, card: 3 });
+   */
   public move(
     roomCode: string,
     playerId: string,
@@ -36,7 +41,12 @@ export class CursorBroadcaster {
   ): Promise<void> {
     return this.publisher.publish(roomCode, {
       event: 'room.cursor-move',
-      payload: { playerId, x: position.x, y: position.y }
+      payload: {
+        playerId,
+        x: position.x,
+        y: position.y,
+        card: position.card ?? null
+      }
     });
   }
 

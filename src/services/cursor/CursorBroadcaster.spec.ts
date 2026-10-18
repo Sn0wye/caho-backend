@@ -20,13 +20,21 @@ describe('CursorBroadcaster', () => {
   it('broadcasts moves and leaves on the Room channel', async () => {
     const { cursors, publisher } = buildBroadcaster();
     await cursors.move('ABC123', 'player-a', { x: 0.25, y: -1 });
+    await cursors.move('ABC123', 'player-a', { x: 0, y: 0.9, card: 3 });
     await cursors.hide('ABC123', 'player-a');
     expect(publisher.published).toEqual([
       {
         channel: 'ABC123',
         event: {
           event: 'room.cursor-move',
-          payload: { playerId: 'player-a', x: 0.25, y: -1 }
+          payload: { playerId: 'player-a', x: 0.25, y: -1, card: null }
+        }
+      },
+      {
+        channel: 'ABC123',
+        event: {
+          event: 'room.cursor-move',
+          payload: { playerId: 'player-a', x: 0, y: 0.9, card: 3 }
         }
       },
       {
