@@ -6,6 +6,7 @@ import {
   sanitizedRoomSchema
 } from '@/schemas';
 import { z } from 'zod';
+import { cursorPosition } from './cursor';
 
 // The room channel (channel name = Room Code) carries every broadcast to all of a
 // Room's subscribers. Payloads are self-describing so the frontend patches its
@@ -76,7 +77,30 @@ export const roomEvent = z.union([
   z.object({
     event: z.literal('room.game-end'),
     payload: rankingSchema
+  }),
+  // Live cursors on the table layout (ADR-0006). Relayed from one Player's Room
+  // socket to everyone in the Room, sender included; clients drop their own.
+  // Ephemeral: nothing is stored, and a missed move is replaced by the next.
+  z.object({
+    event: z.literal('room.cursor-move'),
+    payload: cursorPosition.extend({ playerId: z.string() })
+  }),
+  // The Player's cursor left the table or their Room socket closed.
+  z.object({
+    event: z.literal('room.cursor-leave'),
+    payload: z.object({ playerId: z.string() })
   })
 ]);
 
 export type RoomEvent = z.infer<typeof roomEvent>;
+
+/**
+ * True for the high-frequency cursor relay events, which skip per-message
+ * tracing and debug logs so they don't flood Seq.
+ *
+ * @example
+ * if (isCursorEvent(event)) return deliverQuietly(event);
+ */
+export function isCursorEvent(event: { event: string }): boolean {
+  return event.event === 'room.cursor-move' || event.event === 'room.cursor-leave';
+}

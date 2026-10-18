@@ -1,4 +1,4 @@
-import type { PlayerEvent, RoomEvent } from '@/contracts';
+import { type PlayerEvent, type RoomEvent, isCursorEvent } from '@/contracts';
 import { CAHO_REDIS_PREFIX } from '@/db/redis-prefix';
 import { traceOperation } from '@/lib/tracing';
 import { ROOT_CONTEXT, context, propagation } from '@opentelemetry/api';
@@ -24,6 +24,15 @@ export class Pubsub {
 
   /** Send event metadata and trace context within CAHO's namespace. Example: publish(roomCode, event). */
   public async publish(channel: string, event: Event): Promise<void> {
+    // Cursors move ~20 times a second per Player; a span and a debug line for
+    // each would bury the game's traces in Seq. ADR-0006.
+    if (isCursorEvent(event)) {
+      await this.redis.publish(
+        `${CAHO_REDIS_PREFIX}${channel}`,
+        JSON.stringify(event)
+      );
+      return;
+    }
     await traceOperation(
       'pubsub.publish',
       { channel, eventType: event.event },
@@ -127,6 +136,10 @@ export class Pubsub {
   ): Promise<void> {
     const wireEvent = this.decodeMessage(channel, message);
     if (!wireEvent) return;
+    if (isCursorEvent(wireEvent)) {
+      await this.invokeCallback(channel, wireEvent, cb).catch(() => {});
+      return;
+    }
     try {
       const { __cahoTrace, ...event } = wireEvent;
       const parent = propagation.extract(ROOT_CONTEXT, __cahoTrace ?? {});

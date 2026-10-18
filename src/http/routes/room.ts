@@ -18,10 +18,10 @@ import { judgeChooseWinner } from '../controllers/room/judge-choose-winner';
 
 export const roomRoutes = async (
   app: App,
-  { rooms, rounds, roomView }: GameModules
+  { rooms, rounds, roomView, cursors }: GameModules
 ) => {
   // Picked, not forwarded: the options also carry this plugin's `prefix`.
-  const modules: GameModules = { rooms, rounds, roomView };
+  const modules: GameModules = { rooms, rounds, roomView, cursors };
   app.register(listRoomsController, modules);
   app.register(getRoomController, modules);
   app.register(getRoomPlayersController, modules);

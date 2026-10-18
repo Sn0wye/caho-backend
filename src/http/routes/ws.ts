@@ -1,8 +1,10 @@
 import type { App } from '@/app';
+import { CursorInbox } from '@/http/cursor-inbox';
 import { completeSocketUpgrade } from '@/http/request-observability';
 import { SocketSession } from '@/http/socket-session';
 import { SocketSessions } from '@/http/socket-session';
 import type { IGameEventSubscriber } from '@/services/IGameEventSubscriber';
+import type { CursorBroadcaster } from '@/services/cursor/CursorBroadcaster';
 import type { RoomOrchestrator } from '@/services/room/RoomOrchestrator';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -24,8 +26,13 @@ export const wsRoutes = async (
   app: App,
   {
     rooms: roomOrchestrator,
-    subscriber
-  }: { rooms: RoomOrchestrator; subscriber: IGameEventSubscriber }
+    subscriber,
+    cursors
+  }: {
+    rooms: RoomOrchestrator;
+    subscriber: IGameEventSubscriber;
+    cursors: CursorBroadcaster;
+  }
 ) => {
   const sessions = new SocketSessions();
   app.addHook('onClose', () => sessions.close());
@@ -73,7 +80,8 @@ export const wsRoutes = async (
     },
     async (conn, req) => {
       completeSocketUpgrade(req);
-      if (!sessionUserId(req)) {
+      const userId = sessionUserId(req);
+      if (!userId) {
         req.log.warn(
           { event: 'ws.auth_rejected', reason: 'unauthenticated' },
           'WebSocket rejected'
@@ -82,12 +90,17 @@ export const wsRoutes = async (
         return;
       }
 
+      // The Room socket also carries this Player's cursor in (ADR-0006).
+      const { roomCode } = req.params;
+      const cursorInbox = new CursorInbox(cursors, req.log, roomCode, userId);
       sessions.open(
         new SocketSession(
           conn.socket,
           req.log,
-          req.params.roomCode,
-          (channel, receive) => subscriber.subscribe(channel, receive)
+          roomCode,
+          (channel, receive) => subscriber.subscribe(channel, receive),
+          cursorInbox,
+          cursorInbox
         )
       );
     }

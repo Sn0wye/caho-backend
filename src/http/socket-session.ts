@@ -13,6 +13,12 @@ export interface SocketPresence {
   disconnected(): Promise<void>;
 }
 
+// Client-to-server text frames. Only the Room socket reads any (cursor
+// positions, ADR-0006); everything else the socket carries flows outward.
+export interface SocketInbound {
+  receive(message: string): void;
+}
+
 /** Own socket errors and async cleanup. Example: new SocketSession(socket, log, channel, subscribe).start(). */
 export class SocketSession {
   private unsubscribe?: () => Promise<void>;
@@ -28,12 +34,14 @@ export class SocketSession {
     private readonly log: FastifyBaseLogger,
     private readonly channel: string,
     private readonly subscribe: SubscribeToEvents,
-    private readonly presence?: SocketPresence
+    private readonly presence?: SocketPresence,
+    private readonly inbound?: SocketInbound
   ) {}
 
   public start(): void {
     this.listenSocketFailures();
     this.socket.on('ping', () => this.socket.pong());
+    this.listenInbound();
     this.socket.once('close', (closeCode: number) => {
       void traceBackground(
         'ws.close',
@@ -64,6 +72,14 @@ export class SocketSession {
         { event: 'ws.socket_failed', channel: this.channel, err },
         'WebSocket failed'
       );
+    });
+  }
+
+  private listenInbound(): void {
+    const inbound = this.inbound;
+    if (!inbound) return;
+    this.socket.on('message', (message: Buffer, isBinary: boolean) => {
+      if (!isBinary) inbound.receive(message.toString());
     });
   }
 

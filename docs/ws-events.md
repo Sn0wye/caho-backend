@@ -21,7 +21,7 @@ Two socket endpoints, two channels:
 
 | Connect to | Channel carries | Purpose |
 |---|---|---|
-| `GET /room/:roomCode` | `room.*` events | Everything broadcast to the whole Room |
+| `GET /room/:roomCode` | `room.*` events | Everything broadcast to the whole Room; also reads `cursor.*` in |
 | `GET /:userId` | `player.*` events | Private, per-user (your Hand); also drives presence |
 
 - **Room channel** name = the 6-char Room **Code**. All subscribers get every
@@ -79,6 +79,8 @@ const isJudge = (player: RoomPlayer) => player.id === currentJudgeId;
 | `room.time-to-judge` | `{ roundNumber: number, roundPlayedCards: RoundPlayedCard[] }` |
 | `room.round-end` | `{ roundNumber, winner: RoundPlayedCard \| null, winnerId: string \| null, newScore: number \| null, reason: 'picked' \| 'aborted' }` |
 | `room.game-end` | `Ranking` |
+| `room.cursor-move` | `{ playerId: string, x: number, y: number }` — table space, see below |
+| `room.cursor-leave` | `{ playerId: string }` |
 
 ### Event reference (player channel)
 
@@ -135,6 +137,28 @@ type Ranking = Array<{ id: string; username: string; avatarUrl: string | null; s
   Round (or `room.game-end`) follows.
 - **`room.game-end`** — the Room is over; render the final `Ranking`.
 - **`player.cards-drawn`** — replace your Hand with `payload`.
+
+## Live cursors (client → server)
+
+The Room socket is the one place the server reads messages from the client
+([ADR-0006](./adr/0006-cursor-positions-over-the-room-socket.md)). A Player in
+the Room may send:
+
+```ts
+{ event: 'cursor.move', payload: { x: number, y: number } }   // x, y in [-2, 2]
+{ event: 'cursor.hide' }                                        // pointer left the table
+```
+
+Coordinates are **table space**: the table's centre is `(0, 0)` and its rim is
+at radius `1`, independent of screen size or the seat a client draws at the
+bottom. The server rebroadcasts each move as `room.cursor-move` to the whole Room
+(sender included, so drop your own `playerId`), keeps nothing, and sends
+`room.cursor-leave` on `cursor.hide` or when the socket closes.
+
+- Send at most every 50ms; the server drops moves closer than 30ms apart.
+- Messages from a signed-in User who isn't in the Room, malformed JSON and the
+  keepalive `ping` are ignored. Nothing closes the socket.
+- Membership is checked once, when the socket opens.
 
 ## Resync over REST
 

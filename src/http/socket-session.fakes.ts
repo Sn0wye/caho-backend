@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { PlayerEvent, RoomEvent } from '@/contracts';
-import type { SocketPresence } from './socket-session';
+import type { SocketInbound, SocketPresence } from './socket-session';
 
 export class FakeGameSocket extends EventEmitter {
   readyState = 1;
@@ -61,5 +61,13 @@ export class FakeSocketPresence implements SocketPresence {
     await this.disconnectDelay;
     this.changes.push(false);
     if (this.disconnectError) throw this.disconnectError;
+  }
+}
+
+export class FakeSocketInbound implements SocketInbound {
+  readonly messages: string[] = [];
+
+  receive(message: string): void {
+    this.messages.push(message);
   }
 }

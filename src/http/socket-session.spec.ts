@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws';
 import { SocketSession, SocketSessions } from './socket-session';
 import {
   FakeGameSocket,
+  FakeSocketInbound,
   FakeSocketPresence,
   FakeSocketSubscription
 } from './socket-session.fakes';
@@ -107,6 +108,26 @@ describe('WebSocket observability and cleanup', () => {
         )
       ).toBe(true)
     );
+  });
+
+  it('hands text frames to the inbound reader and skips binary ones', () => {
+    const output = new FakeConsoleOutput();
+    const { logger } = buildLogger({ consoleOutput: output });
+    const socket = new FakeGameSocket();
+    const subscription = new FakeSocketSubscription();
+    const inbound = new FakeSocketInbound();
+    const session = new SocketSession(
+      socket as unknown as WebSocket,
+      logger,
+      'ABC123',
+      (channel, receive) => subscription.subscribe(channel, receive),
+      undefined,
+      inbound
+    );
+    session.start();
+    socket.emit('message', Buffer.from('{"event":"cursor.hide"}'), false);
+    socket.emit('message', Buffer.from([1, 2, 3]), true);
+    expect(inbound.messages).toEqual(['{"event":"cursor.hide"}']);
   });
 
   it('cleans a subscription even if the socket closes before subscribe resolves', async () => {
