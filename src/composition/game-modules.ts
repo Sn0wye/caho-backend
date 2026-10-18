@@ -1,5 +1,6 @@
 import type { IGameStore } from '@/repositories/game-store/IGameStore';
 import type { IGameEventPublisher } from '@/services/IGameEventPublisher';
+import { CursorBroadcaster } from '@/services/cursor/CursorBroadcaster';
 import { BlackCardDeck } from '@/services/room/BlackCardDeck';
 import { RoomOrchestrator } from '@/services/room/RoomOrchestrator';
 import { RoomService } from '@/services/room/RoomService';
@@ -20,12 +21,13 @@ export type GameAdapters = {
   log?: Logger;
 };
 
-// The game modules routes call: commands (RoomOrchestrator, RoundLifecycle)
-// and reads (RoomView).
+// The game modules routes call: commands (RoomOrchestrator, RoundLifecycle),
+// reads (RoomView) and the live cursor relay (CursorBroadcaster, ADR-0006).
 export type GameModules = {
   rooms: RoomOrchestrator;
   rounds: RoundLifecycle;
   roomView: RoomView;
+  cursors: CursorBroadcaster;
 };
 
 /**
@@ -53,6 +55,7 @@ export function buildGameModules(adapters: GameAdapters): GameModules {
   return {
     rooms: new RoomOrchestrator(roomService, rounds, publisher, log),
     rounds,
-    roomView: new RoomView(store, deck)
+    roomView: new RoomView(store, deck),
+    cursors: new CursorBroadcaster(roomService, publisher)
   };
 }

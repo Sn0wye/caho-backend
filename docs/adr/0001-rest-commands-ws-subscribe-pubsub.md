@@ -36,3 +36,6 @@ route is a thin bridge that forwards channel messages to the socket.
 - `socketio.ts` is dead and retained only as historical reference. **Do not
   reintroduce command handling over the socket** — that is the path this decision
   deliberately rejected.
+
+  Cursor positions are the one inbound exception: they are not commands and
+  change no state. See ADR-0006.

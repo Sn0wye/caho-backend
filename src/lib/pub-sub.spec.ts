@@ -92,6 +92,48 @@ describe('Pub/Sub observability', () => {
     }
   });
 
+  // ADR-0006: cursors move ~20 times a second per Player; tracing each would
+  // flood Seq.
+  it('relays cursor events without spans, trace context or debug logs', async () => {
+    const harness = new TelemetryTestHarness();
+    harness.start();
+    const redis = new FakeRedisPubsub();
+    const output = new FakeConsoleOutput();
+    const { logger } = buildLogger({
+      consoleOutput: output,
+      settings: {
+        level: 'debug',
+        serviceName: 'caho-backend',
+        serviceVersion: 'test',
+        environment: 'test'
+      }
+    });
+    const pubsub = new Pubsub(redis as unknown as Redis, logger);
+    const cursor: RoomEvent = {
+      event: 'room.cursor-move',
+      payload: { playerId: 'player-a', x: 0.5, y: -0.25 }
+    };
+    const received = vi.fn();
+    try {
+      const unsubscribe = await pubsub.subscribe('ABC123', received);
+      await traceOperation('request', {}, () =>
+        pubsub.publish('ABC123', cursor)
+      );
+      const message = redis.published[0].message;
+      expect(JSON.parse(message)).toEqual(cursor);
+      redis.connections[0].emit('message', 'caho:ABC123', message);
+      await vi.waitFor(() => expect(received).toHaveBeenCalledWith(cursor));
+      const spanNames = harness.exporter
+        .getFinishedSpans()
+        .map(span => span.name);
+      expect(spanNames).toEqual(['request']);
+      expect(output.lines).toEqual([]);
+      await unsubscribe();
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('logs malformed messages without their contents and catches callback failures', async () => {
     const redis = new FakeRedisPubsub();
     const output = new FakeConsoleOutput();

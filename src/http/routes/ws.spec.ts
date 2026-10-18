@@ -13,9 +13,14 @@ afterEach(async () => {
   await harness.app.close();
 });
 
-async function connect(path: string): Promise<{ socket: WebSocket; received: string[] }> {
-  const address = await harness.app.listen({ host: '127.0.0.1', port: 0 });
-  const socket = new WebSocket(`${address.replace('http', 'ws')}/ws${path}`, { headers: signedInAs(PLAYER_ID) });
+let address: string | null = null;
+afterEach(() => {
+  address = null;
+});
+
+async function connect(path: string, userId = PLAYER_ID): Promise<{ socket: WebSocket; received: string[] }> {
+  address ??= await harness.app.listen({ host: '127.0.0.1', port: 0 });
+  const socket = new WebSocket(`${address.replace('http', 'ws')}/ws${path}`, { headers: signedInAs(userId) });
   const received: string[] = [];
   socket.on('message', message => received.push(message.toString()));
   await new Promise(resolve => socket.once('open', resolve));
@@ -36,6 +41,52 @@ describe('WS /ws/room/:roomCode', () => {
       ])
     );
     socket.close();
+  });
+});
+
+// ADR-0006: the Room socket carries cursor positions in and fans them out.
+describe('WS /ws/room/:roomCode cursors', () => {
+  const OTHER_ID = 'player-b';
+  const cursorEvents = (received: string[]) =>
+    received.map(message => JSON.parse(message)).filter(event => event.event.startsWith('room.cursor'));
+
+  it("relays a seated Player's cursor to the Room and hides it when they disconnect", async () => {
+    harness = await buildTestApp({
+      room: makeRoom(),
+      players: [makePlayer({ id: PLAYER_ID }), makePlayer({ id: OTHER_ID })]
+    });
+    const sender = await connect(`/room/${ROOM_CODE}`, PLAYER_ID);
+    const watcher = await connect(`/room/${ROOM_CODE}`, OTHER_ID);
+    await vi.waitFor(() => expect(harness.bus.subscriberCount(ROOM_CODE)).toBe(2));
+
+    await vi.waitFor(() => {
+      sender.socket.send(JSON.stringify({ event: 'cursor.move', payload: { x: 0.5, y: -0.5 } }));
+      expect(cursorEvents(watcher.received)[0]).toEqual({
+        event: 'room.cursor-move',
+        payload: { playerId: PLAYER_ID, x: 0.5, y: -0.5 }
+      });
+    });
+    sender.socket.close();
+
+    await vi.waitFor(() =>
+      expect(cursorEvents(watcher.received).at(-1)).toEqual({
+        event: 'room.cursor-leave',
+        payload: { playerId: PLAYER_ID }
+      })
+    );
+    watcher.socket.close();
+  });
+
+  it('ignores cursors from a signed-in User outside the Room', async () => {
+    harness = await buildTestApp({ room: makeRoom(), players: [makePlayer({ id: PLAYER_ID })] }, [OTHER_ID]);
+    const stranger = await connect(`/room/${ROOM_CODE}`, OTHER_ID);
+    await vi.waitFor(() => expect(harness.bus.subscriberCount(ROOM_CODE)).toBe(1));
+
+    stranger.socket.send(JSON.stringify({ event: 'cursor.move', payload: { x: 0, y: 0 } }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(harness.bus.published).toEqual([]);
+    stranger.socket.close();
   });
 });
 
