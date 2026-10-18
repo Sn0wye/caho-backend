@@ -4,8 +4,8 @@ import type { BlackCard } from '@/repositories/cards';
 import type { IGameStore } from '@/repositories/game-store/IGameStore';
 import type {
   Player,
-  PublicRoomWithPlayerCountAndHost,
   Room,
+  RoomListing,
   RoomPlayer,
   Round,
   RoundPlayedCard,
@@ -35,14 +35,15 @@ export function toRoomPlayer({ cardIds: _cardIds, isJudge: _isJudge, ...player }
 }
 
 /**
- * Strip the password off a Room. The only place it is removed, shared by every
- * REST read and the `room.started` broadcast (ADR-0005). issue #26.
+ * Strip the password off a Room, keeping only whether one is set. The only
+ * place it is removed, shared by every REST read and the `room.started`
+ * broadcast (ADR-0005). issue #26.
  *
  * @example
  * publish(roomCode, { event: 'room.started', payload: { room: toSanitizedRoom(room), players } });
  */
-export function toSanitizedRoom({ password: _password, ...room }: Room): SanitizedRoom {
-  return room;
+export function toSanitizedRoom({ password, ...room }: Room): SanitizedRoom {
+  return { ...room, hasPassword: password !== null };
 }
 
 /**
@@ -70,8 +71,8 @@ export class RoomView {
     return toSanitizedRoom(await this.requireRoom(roomCode));
   }
 
-  public async publicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]> {
-    return await this.store.rooms.listPublicRooms();
+  public async lobbyRooms(): Promise<RoomListing[]> {
+    return await this.store.rooms.listLobbyRooms();
   }
 
   public async players(roomCode: string): Promise<RoomPlayer[]> {

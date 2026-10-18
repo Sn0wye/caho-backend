@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 // The caller and the Judge (also Host) mid-game, each with a distinct Hand,
-// the caller having played. Public but with a password set, so a leak shows.
+// the caller having played. Password set, so a leak shows.
 async function openGame(status: Round['status'] = 'PLAYING'): Promise<App> {
   ({ app } = await buildTestApp(
     {
@@ -89,8 +89,8 @@ describe('GET /rooms/:roomCode', () => {
     const response = await get(`/${ROOM_CODE}`);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ code: ROOM_CODE, judgeId: JUDGE_ID, isPublic: true });
-    expect(response.body).not.toContain('password');
+    expect(response.json()).toMatchObject({ code: ROOM_CODE, judgeId: JUDGE_ID, hasPassword: true });
+    expect(response.body).not.toContain('"password"');
     expect(response.body).not.toContain('secret');
   });
 
@@ -102,7 +102,7 @@ describe('GET /rooms/:roomCode', () => {
 });
 
 describe('GET /rooms/list', () => {
-  it('lists a public lobby without its password', async () => {
+  it('lists a locked lobby with hasPassword, never the password', async () => {
     ({ app } = await buildTestApp({
       room: makeRoom({ status: 'LOBBY', round: 0, hostId: JUDGE_ID, judgeId: null, password: 'secret' }),
       players: [makePlayer({ id: CALLER_ID }), makePlayer({ id: JUDGE_ID, isHost: true })]
@@ -111,7 +111,7 @@ describe('GET /rooms/list', () => {
     const response = await get('/list');
 
     expect(response.json()).toEqual([
-      expect.objectContaining({ code: ROOM_CODE, hostUsername: JUDGE_ID, playerCount: 2 })
+      expect.objectContaining({ code: ROOM_CODE, hostUsername: JUDGE_ID, playerCount: 2, hasPassword: true })
     ]);
     expect(response.body).not.toContain('secret');
   });

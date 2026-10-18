@@ -1,5 +1,5 @@
 import type { IRoomRepository } from '@/repositories/room';
-import type { PublicRoomWithPlayerCountAndHost, Room } from '@/schemas';
+import type { Room, RoomListing } from '@/schemas';
 import { type InMemoryGameTables, definedOnly } from './InMemoryGameTables';
 
 // rooms table, keyed by Code like RoomRepository.
@@ -22,19 +22,19 @@ export class InMemoryRoomRepository implements IRoomRepository {
   }
 
   /**
-   * Public LOBBY Rooms with a head count. Postgres inner-joins the Host's users
+   * Every LOBBY Room with a head count. Postgres inner-joins the Host's users
    * row; here the Host's joined profile plays that part.
    *
    * @example
-   * const lobbies = await store.rooms.listPublicRooms();
+   * const lobbies = await store.rooms.listLobbyRooms();
    */
-  async listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]> {
-    const open = [...this.tables.rooms.values()].filter(
-      room => room.isPublic && room.status === 'LOBBY'
+  async listLobbyRooms(): Promise<RoomListing[]> {
+    const lobbies = [...this.tables.rooms.values()].filter(
+      room => room.status === 'LOBBY'
     );
-    return open.flatMap(room => {
+    return lobbies.flatMap(room => {
       const host = this.tables.users.get(room.hostId);
-      return host ? [this.toPublicRoom(room, host.username)] : [];
+      return host ? [this.toRoomListing(room, host.username)] : [];
     });
   }
 
@@ -56,10 +56,7 @@ export class InMemoryRoomRepository implements IRoomRepository {
     return structuredClone(updated);
   }
 
-  private toPublicRoom(
-    room: Room,
-    hostUsername: string
-  ): PublicRoomWithPlayerCountAndHost {
+  private toRoomListing(room: Room, hostUsername: string): RoomListing {
     const playerCount = this.tables.players.filter(
       row => row.roomCode === room.code
     ).length;
@@ -69,7 +66,8 @@ export class InMemoryRoomRepository implements IRoomRepository {
       maxPlayers: room.maxPlayers,
       maxPoints: room.maxPoints,
       playerCount,
-      hostUsername
+      hostUsername,
+      hasPassword: room.password !== null
     };
   }
 }

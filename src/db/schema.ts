@@ -104,7 +104,6 @@ export const rooms = pgTable(
         onDelete: 'cascade',
         onUpdate: 'cascade'
       }),
-    isPublic: boolean('is_public').notNull(),
     round: integer('round').notNull().default(0),
     judgeId: varchar('judge_id', {
       length: 24

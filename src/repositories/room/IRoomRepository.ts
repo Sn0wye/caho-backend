@@ -1,8 +1,8 @@
-import type { PublicRoomWithPlayerCountAndHost, Room } from '@/schemas';
+import type { Room, RoomListing } from '@/schemas';
 
 export interface IRoomRepository {
   getRoomByCode(roomCode: string): Promise<Room | undefined>;
   create(data: Room): Promise<Room>;
-  listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]>;
+  listLobbyRooms(): Promise<RoomListing[]>;
   update(roomCode: string, data: Partial<Room>): Promise<Room>;
 }

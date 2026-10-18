@@ -27,7 +27,7 @@ function post(path: string, userId: string, payload?: object) {
 
 function lobby(players = [makePlayer({ id: HOST_ID, isHost: true })]) {
   return {
-    room: makeRoom({ status: 'LOBBY' as const, round: 0, hostId: HOST_ID, judgeId: null, isPublic: false, password: 'secret' }),
+    room: makeRoom({ status: 'LOBBY' as const, round: 0, hostId: HOST_ID, judgeId: null, password: 'secret' }),
     players
   };
 }
@@ -47,7 +47,7 @@ function midGame() {
 describe('POST /rooms/create and /rooms/join', () => {
   it('seat the creator and a joiner as the same Player shape, with no password in either reply', async () => {
     harness = await buildTestApp({ room: makeRoom({ code: 'OTHER1' }) }, ['creator', 'joiner']);
-    const settings = { maxPlayers: 4, maxPoints: 5, isPublic: false, password: 'secret' };
+    const settings = { maxPlayers: 4, maxPoints: 5, password: 'secret' };
 
     const created = await post('/create', 'creator', settings);
     const { code } = created.json();
@@ -57,6 +57,7 @@ describe('POST /rooms/create and /rooms/join', () => {
     expect(joined.statusCode).toBe(200);
     for (const reply of [created, joined]) {
       expect(reply.json()).toMatchObject({ code, hostId: 'creator', status: 'LOBBY' });
+      expect(reply.json()).toMatchObject({ hasPassword: true });
       expect(reply.body).not.toContain('secret');
     }
     const shape = { avatarUrl: null, score: 0, isReady: false, isJudge: false, isActive: true, cardIds: [] };
@@ -71,6 +72,26 @@ describe('POST /rooms/create and /rooms/join', () => {
 
     expect(reply.statusCode).toBe(400);
   });
+
+  // Regression: a password only locked a Room when isPublic was false, so a
+  // public Room with a password let anyone in. The password alone decides now.
+  it('rejects joining a locked Room without a password', async () => {
+    harness = await buildTestApp(lobby(), ['joiner']);
+
+    const reply = await post('/join', 'joiner', { roomCode: ROOM_CODE, password: null });
+
+    expect(reply.statusCode).toBe(400);
+  });
+
+  it('treats an empty password as no password', async () => {
+    harness = await buildTestApp({ room: makeRoom({ code: 'OTHER1' }) }, ['creator', 'joiner']);
+
+    const created = await post('/create', 'creator', { maxPlayers: 4, maxPoints: 5, password: '' });
+    const joined = await post('/join', 'joiner', { roomCode: created.json().code, password: null });
+
+    expect(created.json()).toMatchObject({ hasPassword: false });
+    expect(joined.statusCode).toBe(200);
+  });
 });
 
 describe('POST /rooms/start', () => {
@@ -84,7 +105,7 @@ describe('POST /rooms/start', () => {
     const started = harness.bus.published.find(({ event }) => event.event === 'room.started');
     expect(started?.event.payload).toMatchObject({ room: { code: ROOM_CODE, status: 'IN_PROGRESS' } });
     expect(JSON.stringify(started)).not.toContain('secret');
-    expect(JSON.stringify(started)).not.toContain('password');
+    expect(JSON.stringify(started)).not.toContain('"password"');
   });
 });
 

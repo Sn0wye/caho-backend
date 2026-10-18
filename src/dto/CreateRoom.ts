@@ -3,5 +3,4 @@ export type CreateRoomDTO = {
   maxPoints: number;
   hostId: string;
   password: string | null;
-  isPublic: boolean;
 };

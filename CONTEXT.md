@@ -43,7 +43,8 @@ _Avoid_: quit, disconnect, drop
 
 **Room**:
 A single game instance, addressed by a short Code. Has a lifecycle status:
-`LOBBY` → `IN_PROGRESS` → `FINISHED`. May be public or password-protected.
+`LOBBY` → `IN_PROGRESS` → `FINISHED`. Every LOBBY Room is listed; a Room may
+be password-protected, in which case joining needs the password.
 _Avoid_: game, session, lobby, match
 
 **Code**:
