@@ -68,7 +68,6 @@ export function makeRoom(overrides: Partial<Room> = {}): Room {
     status: 'IN_PROGRESS',
     hostId: 'player-judge',
     password: null,
-    isPublic: true,
     prevJudgeId: null,
     judgeId: 'player-judge',
     round: 1,

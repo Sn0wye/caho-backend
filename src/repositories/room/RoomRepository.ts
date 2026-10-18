@@ -1,7 +1,7 @@
 import { db } from '@/db';
 import { roomPlayers, rooms, users } from '@/db/schema';
-import type { PublicRoomWithPlayerCountAndHost, Room } from '@/schemas';
-import { and, count, eq } from 'drizzle-orm';
+import type { Room, RoomListing } from '@/schemas';
+import { count, eq, isNotNull } from 'drizzle-orm';
 import type { IRoomRepository } from './IRoomRepository';
 
 export class RoomRepository implements IRoomRepository {
@@ -25,20 +25,21 @@ export class RoomRepository implements IRoomRepository {
     return room;
   }
 
-  async listPublicRooms(): Promise<PublicRoomWithPlayerCountAndHost[]> {
-    const publicRooms = await this.db
+  async listLobbyRooms(): Promise<RoomListing[]> {
+    const lobbyRooms = await this.db
       .select({
         id: rooms.id,
         code: rooms.code,
         maxPlayers: rooms.maxPlayers,
         maxPoints: rooms.maxPoints,
         playerCount: count(roomPlayers.playerId).mapWith(Number),
-        hostUsername: users.username
+        hostUsername: users.username,
+        hasPassword: isNotNull(rooms.password).mapWith(Boolean)
       })
       .from(rooms)
       .innerJoin(users, eq(rooms.hostId, users.id))
       .leftJoin(roomPlayers, eq(rooms.code, roomPlayers.roomCode))
-      .where(and(eq(rooms.isPublic, true), eq(rooms.status, 'LOBBY')))
+      .where(eq(rooms.status, 'LOBBY'))
       .groupBy(
         rooms.id,
         rooms.code,
@@ -50,7 +51,7 @@ export class RoomRepository implements IRoomRepository {
 
     // TODO: auto expire rooms
 
-    return publicRooms;
+    return lobbyRooms;
   }
 
   async update(roomCode: string, data: Partial<Room>): Promise<Room> {

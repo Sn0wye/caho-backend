@@ -1,9 +1,9 @@
 import type { App } from '@/app';
 import type { GameModules } from '@/composition/game-modules';
-import { listPublicRoomsResponse } from '@/contracts';
+import { listRoomsResponse } from '@/contracts';
 import { ensureAuth } from '@/plugins/ensure-auth';
 
-export const listPublicController = async (
+export const listRoomsController = async (
   app: App,
   { roomView }: GameModules
 ) => {
@@ -12,13 +12,13 @@ export const listPublicController = async (
     {
       schema: {
         tags: ['Rooms'],
-        description: 'List public rooms',
+        description: 'List every LOBBY Room, flagging the ones with a password',
         response: {
-          200: listPublicRoomsResponse
+          200: listRoomsResponse
         },
         security: [{ cookieAuth: [], bearerAuth: [] }]
       }
     },
-    async () => roomView.publicRooms()
+    async () => roomView.lobbyRooms()
   );
 };

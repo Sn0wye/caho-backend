@@ -6,7 +6,7 @@ import { getRoomController } from '../controllers/room/get-room';
 import { getRoomPlayersController } from '../controllers/room/get-room-players';
 import { joinRoomController } from '../controllers/room/join-room';
 import { leaveRoomController } from '../controllers/room/leave-room';
-import { listPublicController } from '../controllers/room/list-public-rooms';
+import { listRoomsController } from '../controllers/room/list-rooms';
 import { playerReadyController } from '../controllers/room/player-ready';
 import { startRoomController } from '../controllers/room/start-room';
 import { getRoomBlackCardController } from '../controllers/room/get-room-black-card';
@@ -22,7 +22,7 @@ export const roomRoutes = async (
 ) => {
   // Picked, not forwarded: the options also carry this plugin's `prefix`.
   const modules: GameModules = { rooms, rounds, roomView };
-  app.register(listPublicController, modules);
+  app.register(listRoomsController, modules);
   app.register(getRoomController, modules);
   app.register(getRoomPlayersController, modules);
   app.register(getRoomBlackCardController, modules);

@@ -246,7 +246,7 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
     expect((await store.rounds.find(ROOM_CODE, 1))?.id).toBe('round-1');
   });
 
-  it('lists public LOBBY Rooms with their head count and Host', async () => {
+  it('lists every LOBBY Room with its head count, Host and lock', async () => {
     const store = await harness.open();
     const lobby = {
       status: 'LOBBY' as const,
@@ -266,9 +266,9 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
       {
         room: makeRoom({
           ...lobby,
-          id: 'r-priv',
-          code: 'PRIV01',
-          isPublic: false
+          id: 'r-lock',
+          code: 'LOCK01',
+          password: 'secret'
         })
       },
       harness.users
@@ -279,14 +279,25 @@ export function describeRoomsAndPlayers(harness: GameStoreHarness): void {
       harness.users
     );
 
-    expect(await store.rooms.listPublicRooms()).toEqual([
+    const listed = await store.rooms.listLobbyRooms();
+    expect(listed.sort((a, b) => a.code.localeCompare(b.code))).toEqual([
+      {
+        id: 'r-lock',
+        code: 'LOCK01',
+        maxPlayers: 10,
+        maxPoints: 5,
+        playerCount: 0,
+        hostUsername: 'Ana',
+        hasPassword: true
+      },
       {
         id: 'r-open',
         code: 'OPEN01',
         maxPlayers: 10,
         maxPoints: 5,
         playerCount: 1,
-        hostUsername: 'Ana'
+        hostUsername: 'Ana',
+        hasPassword: false
       }
     ]);
   });

@@ -15,7 +15,6 @@ function makeRoom(overrides: Partial<Room> = {}): Room {
     status: 'IN_PROGRESS',
     hostId: 'host-1',
     password: null,
-    isPublic: true,
     prevJudgeId: null,
     judgeId: 'judge-1',
     round: 1,

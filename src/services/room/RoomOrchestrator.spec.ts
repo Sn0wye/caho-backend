@@ -136,7 +136,6 @@ describe('RoomOrchestrator.joinRoom', () => {
           round: 0,
           hostId: HOST_ID,
           judgeId: null,
-          isPublic: false,
           password: 'right'
         })
       })
@@ -478,7 +477,6 @@ describe('Room lifecycle logging', () => {
           round: 0,
           hostId: HOST_ID,
           judgeId: null,
-          isPublic: false,
           password: 'private-password'
         })
       })

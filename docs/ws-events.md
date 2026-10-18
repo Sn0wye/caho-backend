@@ -89,12 +89,12 @@ const isJudge = (player: RoomPlayer) => player.id === currentJudgeId;
 ### Supporting shapes
 
 ```ts
-type SanitizedRoom = {           // Room without `password`
+type SanitizedRoom = {           // Room with `password` reduced to `hasPassword`
   id: string; code: string;
   maxPlayers: number; maxPoints: number;
   status: 'LOBBY' | 'IN_PROGRESS' | 'FINISHED';
   hostId: string;
-  isPublic: boolean;
+  hasPassword: boolean;
   prevJudgeId: string | null; judgeId: string | null;
   round: number;
   pickedWhiteCards: string[]; pickedBlackCards: string[];

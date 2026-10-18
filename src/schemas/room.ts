@@ -19,7 +19,6 @@ export const roomSchema = z.object({
     .string()
     .or(z.null())
     .transform(v => (v === '' || v === undefined ? null : v)),
-  isPublic: z.string().transform(v => v === 'true'),
   prevJudgeId: z.string().min(1).or(z.null()).default(null),
   judgeId: z.string().min(1).or(z.null()).default(null),
   round: z.number().int().min(0).positive().default(0),
@@ -30,18 +29,22 @@ export const roomSchema = z.object({
   updatedAt: z.coerce.date()
 });
 
-export const publicRoomWithPlayerCountAndHost = z.object({
+// A LOBBY Room as the rooms page lists it. Every Room is listed; hasPassword
+// tells the client whether to prompt for one before joining.
+export const roomListingSchema = z.object({
   id: z.string(),
   code: z.string(),
   maxPlayers: z.number(),
   maxPoints: z.number(),
   playerCount: z.number(),
-  hostUsername: z.string()
+  hostUsername: z.string(),
+  hasPassword: z.boolean()
 });
 
-// What any viewer may see of a Room: everything but the password. Written out
+// What any viewer may see of a Room: everything but the password, which is
+// reduced to hasPassword. Written out
 // rather than `roomSchema.omit(...)` because roomSchema parses form input
-// (`isPublic` from a string, `round` positive) and would reject a stored Room
+// (`round` positive) and would reject a stored Room
 // when used as a response schema. Room read endpoints declare it so Fastify
 // drops undeclared fields. See issue #26.
 export const sanitizedRoomSchema = z.object({
@@ -51,7 +54,7 @@ export const sanitizedRoomSchema = z.object({
   maxPoints: z.number().int(),
   status: z.enum(['LOBBY', 'IN_PROGRESS', 'FINISHED']),
   hostId: z.string(),
-  isPublic: z.boolean(),
+  hasPassword: z.boolean(),
   prevJudgeId: z.string().nullable(),
   judgeId: z.string().nullable(),
   round: z.number().int(),
@@ -68,6 +71,4 @@ export type SanitizedRoom = z.infer<typeof sanitizedRoomSchema>;
 
 export type RoomStatus = Room['status'];
 
-export type PublicRoomWithPlayerCountAndHost = z.infer<
-  typeof publicRoomWithPlayerCountAndHost
->;
+export type RoomListing = z.infer<typeof roomListingSchema>;

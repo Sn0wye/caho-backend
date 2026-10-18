@@ -60,7 +60,6 @@ export class RoomService implements IRoomService {
         status: 'LOBBY',
         code: generateCode(),
         hostId: data.hostId,
-        isPublic: data.isPublic,
         maxPlayers: data.maxPlayers,
         maxPoints: data.maxPoints,
         password: data.password,
@@ -203,7 +202,9 @@ export class RoomService implements IRoomService {
     if (players.length >= room.maxPlayers) {
       throw new BadRequestError(ROOM_ERRORS.ROOM_IS_FULL);
     }
-    if (!room.isPublic && room.password !== password) {
+    // A password locks the Room for everyone. This used to also need
+    // isPublic=false, so a public Room with a password let anyone in.
+    if (room.password !== null && room.password !== password) {
       throw new BadRequestError(ROOM_ERRORS.WRONG_PASSWORD);
     }
   }
