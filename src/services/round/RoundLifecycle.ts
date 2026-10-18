@@ -86,7 +86,7 @@ export class RoundLifecycle {
     playerId: string,
     playedCardIds: string[]
   ): Promise<void> {
-    const { player, cardsDrawn } = await this.rules.playCards(
+    const { player, hand } = await this.rules.playCards(
       roomCode,
       playerId,
       playedCardIds
@@ -106,7 +106,7 @@ export class RoundLifecycle {
     });
     await this.publisher.publish(player.id, {
       event: 'player.cards-drawn',
-      payload: cardsDrawn
+      payload: hand
     });
     await this.advanceIfAllPlayed(await this.activeRound(roomCode));
   }

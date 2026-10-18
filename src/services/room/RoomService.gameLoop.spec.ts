@@ -29,12 +29,25 @@ describe('RoomService.playCards rules', () => {
   it('records the play in order and marks the Player as played', async () => {
     const { service, store } = await buildPlay(2);
 
-    const { player, cardsDrawn } = await service.playCards(ROOM_CODE, 'player-a', ['w3', 'w1']);
+    const { player } = await service.playCards(ROOM_CODE, 'player-a', ['w3', 'w1']);
 
     const [playedCards] = await store.playedCards.findByRoomCodeAndRoundNumber(ROOM_CODE, 1);
     expect(playedCards.whiteCards.map(card => card.id)).toEqual(['w3', 'w1']);
     expect(player.isReady).toBe(true);
-    expect(cardsDrawn).toHaveLength(2);
+  });
+
+  // `player.cards-drawn` replaces the client's Hand, so the result must be the
+  // whole refilled Hand, not just the cards drawn to top it up.
+  it('returns the whole refilled Hand: the kept cards plus the fresh ones', async () => {
+    const { service } = await buildPlay(2);
+
+    const { player, hand: refilled } = await service.playCards(ROOM_CODE, 'player-a', ['w3', 'w1']);
+
+    expect(refilled).toHaveLength(hand.length);
+    expect(refilled.map(card => card.id)).toEqual(player.cardIds);
+    expect(refilled.map(card => card.id)).toContain('w2');
+    expect(refilled.map(card => card.id)).not.toContain('w1');
+    expect(refilled.map(card => card.id)).not.toContain('w3');
   });
 
   it("rejects a count that does not match the Black Card's pick", async () => {

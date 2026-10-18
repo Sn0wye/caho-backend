@@ -70,8 +70,8 @@ export type GameStart = {
 };
 
 // A Player's accepted answer: the Player as stored afterwards (isReady true) and
-// the White Cards dealt to refill their Hand.
-export type PlayResult = { player: Player; cardsDrawn: WhiteCard[] };
+// their whole Hand after the refill (kept cards plus the freshly dealt ones).
+export type PlayResult = { player: Player; hand: WhiteCard[] };
 
 // Outcome of a Host departing (explicit Leave or a connection drop), branched on
 // Room status per ADR-0002. Drives the Room-level broadcast: the Room either ends
