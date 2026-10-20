@@ -38,6 +38,27 @@ export class InMemoryRoundPlayedCardsRepository
     return { id: row.id, roundId: row.roundId, createdAt: now, updatedAt: now };
   }
 
+  /**
+   * Record a play only if `assertRoundOpen` accepts the Round as stored now.
+   * No await separates the check from the write, standing in for the row lock.
+   *
+   * @example
+   * await store.playedCards.createInLockedRound(answer, round => assertPlayingPhase(round));
+   */
+  async createInLockedRound(
+    answer: CreateRoundPlayedCardDTO,
+    assertRoundOpen: (lockedRound: Round) => void
+  ): Promise<Omit<RoundPlayedCard, 'player' | 'whiteCards'>> {
+    const round = this.tables.rounds.get(answer.roundId);
+    if (!round) {
+      throw new Error(
+        `Round "${answer.roundId}" not found while recording a play (expected an existing Round)`
+      );
+    }
+    assertRoundOpen(structuredClone(round));
+    return await this.create(answer);
+  }
+
   async findByRoomCodeAndRoundNumber(
     roomCode: string,
     roundNumber: number

@@ -1,10 +1,40 @@
 import { db } from '@/db';
-import { roundPlayedCardWhiteCards, roundPlayedCards } from '@/db/schema';
+import {
+  roundPlayedCardWhiteCards,
+  roundPlayedCards,
+  rounds
+} from '@/db/schema';
 import type { CreateRoundPlayedCardDTO } from '@/dto/CreateRoundPlayedCard';
-import type { RoundPlayedCard } from '@/schemas';
+import type { Round, RoundPlayedCard } from '@/schemas';
 import { createId } from '@paralleldrive/cuid2';
-import { asc } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import type { IRoundPlayedCardsRepository } from './IRoundPlayedCardsRepository';
+
+type CreatedPlayedCards = Omit<RoundPlayedCard, 'player' | 'whiteCards'>;
+type PlayedCardsTransaction = Pick<typeof db, 'insert'>;
+
+// The answer row plus its ordered cards; callers own the transaction.
+async function insertAnswer(
+  tx: PlayedCardsTransaction,
+  data: CreateRoundPlayedCardDTO
+): Promise<CreatedPlayedCards> {
+  const [answer] = await tx
+    .insert(roundPlayedCards)
+    .values({ id: createId(), roundId: data.roundId, playerId: data.playerId })
+    .returning();
+
+  if (!answer) throw new Error('Failed to create round played card');
+
+  await tx.insert(roundPlayedCardWhiteCards).values(
+    data.whiteCardIds.map((whiteCardId, position) => ({
+      roundPlayedCardId: answer.id,
+      whiteCardId,
+      position
+    }))
+  );
+  const { id, roundId, createdAt, updatedAt } = answer;
+  return { id, roundId, createdAt, updatedAt };
+}
 
 export class RoundPlayedCardsRepository implements IRoundPlayedCardsRepository {
   private readonly db = db;
@@ -15,35 +45,32 @@ export class RoundPlayedCardsRepository implements IRoundPlayedCardsRepository {
   // contract (issue #24).
   public async create(
     data: CreateRoundPlayedCardDTO
-  ): Promise<Omit<RoundPlayedCard, 'player' | 'whiteCards'>> {
-    const inserted = await this.db.transaction(async tx => {
-      const [answer] = await tx
-        .insert(roundPlayedCards)
-        .values({
-          id: createId(),
-          roundId: data.roundId,
-          playerId: data.playerId
-        })
-        .returning();
+  ): Promise<CreatedPlayedCards> {
+    return await this.db.transaction(tx => insertAnswer(tx, data));
+  }
 
-      if (!answer) throw new Error('Failed to create round played card');
+  // SELECT ... FOR UPDATE on the Round: claimAdvance's UPDATE waits for this
+  // transaction, so a play either lands before PLAYING -> JUDGING or sees the
+  // new phase and is refused, never recorded into a Round already judging.
+  public async createInLockedRound(
+    data: CreateRoundPlayedCardDTO,
+    assertRoundOpen: (lockedRound: Round) => void
+  ): Promise<CreatedPlayedCards> {
+    return await this.db.transaction(async tx => {
+      const [round] = await tx
+        .select()
+        .from(rounds)
+        .where(eq(rounds.id, data.roundId))
+        .for('update');
+      if (!round) {
+        throw new Error(
+          `Round "${data.roundId}" not found while recording a play (expected an existing Round)`
+        );
+      }
 
-      await tx.insert(roundPlayedCardWhiteCards).values(
-        data.whiteCardIds.map((whiteCardId, position) => ({
-          roundPlayedCardId: answer.id,
-          whiteCardId,
-          position
-        }))
-      );
-      return answer;
+      assertRoundOpen(round);
+      return await insertAnswer(tx, data);
     });
-
-    return {
-      id: inserted.id,
-      roundId: inserted.roundId,
-      createdAt: inserted.createdAt,
-      updatedAt: inserted.updatedAt
-    };
   }
 
   public async findByRoomCodeAndRoundNumber(

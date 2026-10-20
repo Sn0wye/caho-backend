@@ -1,8 +1,14 @@
 import { db } from '@/db';
-import { roomPlayers } from '@/db/schema';
-import type { Player } from '@/schemas';
+import { roomPlayers, rooms } from '@/db/schema';
+import type { Player, Room } from '@/schemas';
 import { and, eq, sql } from 'drizzle-orm';
-import type { IRoomPlayersRepository } from './IRoomPlayersRepository';
+import type {
+  AdmitPlayer,
+  IRoomPlayersRepository
+} from './IRoomPlayersRepository';
+
+// The pool or an open transaction: reads and the join insert run on either.
+type RoomPlayersExecutor = Pick<typeof db, 'query' | 'insert'>;
 
 export class RoomPlayersRepository implements IRoomPlayersRepository {
   private db: typeof db;
@@ -12,7 +18,47 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
   }
 
   async getRoomPlayersByCode(roomCode: string): Promise<Player[]> {
-    const players = await this.db.query.roomPlayers.findMany({
+    return await this.readRoomPlayers(this.db, roomCode);
+  }
+
+  async addPlayerToRoom({
+    player,
+    roomCode
+  }: {
+    player: Player;
+    roomCode: string;
+  }): Promise<void> {
+    await this.insertPlayer(this.db, roomCode, player);
+  }
+
+  // SELECT ... FOR UPDATE on the Room serialises joins (and a racing start's
+  // UPDATE) so two joins can't both count the same free seat past maxPlayers.
+  async addPlayerToLockedRoom({
+    roomCode,
+    admit
+  }: {
+    roomCode: string;
+    admit: AdmitPlayer;
+  }): Promise<Room | undefined> {
+    return await this.db.transaction(async tx => {
+      const [room] = await tx
+        .select()
+        .from(rooms)
+        .where(eq(rooms.code, roomCode))
+        .for('update');
+      if (!room) return undefined;
+
+      const player = admit(room, await this.readRoomPlayers(tx, roomCode));
+      await this.insertPlayer(tx, roomCode, player);
+      return room;
+    });
+  }
+
+  private async readRoomPlayers(
+    executor: RoomPlayersExecutor,
+    roomCode: string
+  ): Promise<Player[]> {
+    const players = await executor.query.roomPlayers.findMany({
       where: (roomPlayers, { eq }) => eq(roomPlayers.roomCode, roomCode),
       with: {
         player: true,
@@ -35,14 +81,12 @@ export class RoomPlayersRepository implements IRoomPlayersRepository {
     return mapped;
   }
 
-  async addPlayerToRoom({
-    player,
-    roomCode
-  }: {
-    player: Player;
-    roomCode: string;
-  }): Promise<void> {
-    await this.db.insert(roomPlayers).values({
+  private async insertPlayer(
+    executor: RoomPlayersExecutor,
+    roomCode: string,
+    player: Player
+  ): Promise<void> {
+    await executor.insert(roomPlayers).values({
       score: 0,
       roomCode,
       playerId: player.id,

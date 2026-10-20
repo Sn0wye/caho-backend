@@ -18,7 +18,10 @@ import type {
   RoundPlayedCard,
   WhiteCard
 } from '@/schemas';
-import { assertPlayableCards } from '@/services/round/assertPlayableCards';
+import {
+  assertPlayableCards,
+  assertPlayingPhase
+} from '@/services/round/assertPlayableCards';
 import { generateCode } from '@/utils/generateCode';
 import { getRandomJudge } from '@/utils/getRandomJudge';
 import { createId } from '@paralleldrive/cuid2';
@@ -114,13 +117,10 @@ export class RoomService implements IRoomService {
     assertRoomCanStart(room, players, requesterId);
 
     const judgeId = getRandomJudge(null, players);
+    await this.claimLobbyStart(roomCode, judgeId);
     const blackCard = await this.blackCardDeck.drawBlackCard(roomCode);
     await this.store.players.setPlayersAsUnready(roomCode);
     const startedRoom = await this.store.rooms.update(roomCode, {
-      status: 'IN_PROGRESS',
-      round: 1,
-      judgeId,
-      prevJudgeId: null,
       currentBlackCardId: blackCard.id
     });
 
@@ -138,6 +138,26 @@ export class RoomService implements IRoomService {
       blackCard,
       hands
     };
+  }
+
+  // Moves the Room out of LOBBY before any card is drawn. Two racing starts
+  // both pass assertRoomCanStart on their own reads; only one conditional
+  // UPDATE matches, so the loser stops here instead of re-dealing every Hand.
+  private async claimLobbyStart(
+    roomCode: string,
+    judgeId: string
+  ): Promise<void> {
+    const claimed = await this.store.rooms.claimStart(roomCode, {
+      status: 'IN_PROGRESS',
+      round: 1,
+      judgeId,
+      prevJudgeId: null
+    });
+    if (!claimed) {
+      throw new BadRequestError(
+        `A sala ${roomCode} já foi iniciada (esperado: LOBBY).`
+      );
+    }
   }
 
   // Single end-of-game path: both the host's manual /end and the maxPoints
@@ -165,13 +185,19 @@ export class RoomService implements IRoomService {
     const { roomCode, player, password } = input;
 
     try {
-      const room = await this.getRoom(roomCode);
-
-      player.isHost = room.hostId === player.id;
-      const players = await this.store.players.getRoomPlayersByCode(roomCode);
-
-      this.assertCanJoin(room, players, player.id, password);
-      await this.addPlayerToRoom({ player, roomCode });
+      // The checks run on the locked Room row: read-then-insert without the
+      // lock let two joins both take the last seat past maxPlayers.
+      const room = await this.store.players.addPlayerToLockedRoom({
+        roomCode,
+        admit: (lockedRoom, players) => {
+          this.assertCanJoin(lockedRoom, players, player.id, password);
+          player.isHost = lockedRoom.hostId === player.id;
+          return player;
+        }
+      });
+      if (!room) {
+        throw new NotFoundError(ROOM_ERRORS.ROOM_NOT_FOUND);
+      }
 
       return room;
     } catch (error) {
@@ -395,11 +421,12 @@ export class RoomService implements IRoomService {
       pick: blackCard?.pick ?? 1
     });
 
-    await this.store.playedCards.create({
-      playerId: player.id,
-      roundId: round.id,
-      whiteCardIds: playedCardIds
-    });
+    // Re-checked under the Round row lock: the phase read above can be stale
+    // by the time the play is written (play deadline / last answer advancing).
+    await this.store.playedCards.createInLockedRound(
+      { playerId: player.id, roundId: round.id, whiteCardIds: playedCardIds },
+      assertPlayingPhase
+    );
 
     const hand = await this.refillHand(roomCode, player, playedCardIds);
     return {
