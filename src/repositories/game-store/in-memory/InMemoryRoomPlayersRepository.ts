@@ -1,5 +1,8 @@
-import type { IRoomPlayersRepository } from '@/repositories/room-players';
-import type { Player } from '@/schemas';
+import type {
+  AdmitPlayer,
+  IRoomPlayersRepository
+} from '@/repositories/room-players';
+import type { Player, Room } from '@/schemas';
 import {
   type InMemoryGameTables,
   type PlayerRow,
@@ -24,9 +27,7 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
   constructor(private readonly tables: InMemoryGameTables) {}
 
   async getRoomPlayersByCode(roomCode: string): Promise<Player[]> {
-    return this.tables.players
-      .filter(row => row.roomCode === roomCode)
-      .map(row => this.toPlayer(row));
+    return this.playersIn(roomCode);
   }
 
   /**
@@ -54,6 +55,26 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
       isActive: true,
       cardIds: []
     });
+  }
+
+  /**
+   * Join through `admit`, judged against the Room and its Players. The read,
+   * check and insert run with no await between them, which is the lock here.
+   *
+   * @example
+   * await store.players.addPlayerToLockedRoom({ roomCode: 'ABC123', admit: (_room, _players) => player });
+   */
+  async addPlayerToLockedRoom(input: {
+    roomCode: string;
+    admit: AdmitPlayer;
+  }): Promise<Room | undefined> {
+    const room = this.tables.rooms.get(input.roomCode);
+    if (!room) return undefined;
+
+    const players = this.playersIn(input.roomCode);
+    const player = input.admit(structuredClone(room), players);
+    await this.addPlayerToRoom({ roomCode: input.roomCode, player });
+    return structuredClone(room);
   }
 
   async getPlayerFromRoom(
@@ -130,6 +151,12 @@ export class InMemoryRoomPlayersRepository implements IRoomPlayersRepository {
         `Unique violation on room_players: Player "${playerId}" already in Room "${roomCode}" (expected one row per Room and Player)`
       );
     }
+  }
+
+  private playersIn(roomCode: string): Player[] {
+    return this.tables.players
+      .filter(row => row.roomCode === roomCode)
+      .map(row => this.toPlayer(row));
   }
 
   private findRow(roomCode: string, playerId: string): PlayerRow | undefined {

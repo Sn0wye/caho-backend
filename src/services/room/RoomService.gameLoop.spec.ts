@@ -1,4 +1,4 @@
-import { BadRequestError, ForbiddenError } from '@/errors';
+import { BadRequestError, ForbiddenError, NotFoundError } from '@/errors';
 import { describe, expect, it } from 'vitest';
 import {
   ROOM_CODE,
@@ -113,6 +113,21 @@ describe('RoomService.startGame', () => {
 
     await expect(service.startGame(ROOM_CODE, 'guest-a')).rejects.toThrow(BadRequestError);
   });
+
+  // Both starts read LOBBY before either wrote; only the conditional claim
+  // decides, so the loser can't redraw the Black Card or re-deal.
+  it('lets only one of two racing starts through', async () => {
+    const { service } = await buildLobby();
+
+    const starts = await Promise.allSettled([
+      service.startGame(ROOM_CODE, 'host'),
+      service.startGame(ROOM_CODE, 'host')
+    ]);
+
+    expect(starts.map(start => start.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const rejected = starts.find(start => start.status === 'rejected');
+    expect((rejected as PromiseRejectedResult).reason).toBeInstanceOf(BadRequestError);
+  });
 });
 
 describe('RoomService.togglePlayerReady', () => {
@@ -150,5 +165,29 @@ describe('RoomService.joinRoom', () => {
     await expect(
       service.joinRoom({ roomCode: ROOM_CODE, password: null, player: makePlayer() })
     ).rejects.toThrow(BadRequestError);
+  });
+
+  it('seats only one of two joins racing for the last seat', async () => {
+    const { service, store } = await buildService({
+      room: makeRoom({ status: 'LOBBY', maxPlayers: 2 }),
+      players: [makePlayer({ id: 'host' })],
+      rounds: [],
+    });
+
+    const joins = await Promise.allSettled([
+      service.joinRoom({ roomCode: ROOM_CODE, password: null, player: makePlayer({ id: 'guest-a' }) }),
+      service.joinRoom({ roomCode: ROOM_CODE, password: null, player: makePlayer({ id: 'guest-b' }) })
+    ]);
+
+    expect(joins.map(join => join.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(await store.players.getRoomPlayersByCode(ROOM_CODE)).toHaveLength(2);
+  });
+
+  it('rejects joining a missing Room with NotFoundError', async () => {
+    const { service } = await buildService({ room: makeRoom(), players: [], rounds: [] });
+
+    await expect(
+      service.joinRoom({ roomCode: 'NOPE00', password: null, player: makePlayer() })
+    ).rejects.toThrow(NotFoundError);
   });
 });

@@ -20,7 +20,9 @@ export function assertPlayableCards(attempt: PlayAttempt): void {
   assertCardsInHand(attempt.playedCardIds, attempt.player.cardIds);
 }
 
-function assertPlayingPhase(round: Round): void {
+// Also re-run by RoomService.playCards on the locked Round row.
+// Example: assertPlayingPhase(round)
+export function assertPlayingPhase(round: Round): void {
   if (round.status !== 'PLAYING') {
     throw new BadRequestError(
       `A rodada ${round.roundNumber} não aceita jogadas (fase: ${round.status}, esperado: PLAYING).`

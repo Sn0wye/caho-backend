@@ -10,6 +10,7 @@ import {
   openWithRounds,
   seedGame
 } from './gameStore.fixtures';
+import { describeRaceGuards } from './gameStore.lockContract';
 import {
   describeCardDraws,
   describeRoomsAndPlayers
@@ -32,6 +33,7 @@ export function describeGameStoreContract(harness: GameStoreHarness): void {
     describeExpiredActive(harness);
     describeCardDraws(harness);
     describeRoomsAndPlayers(harness);
+    describeRaceGuards(harness);
   });
 }
 

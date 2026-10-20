@@ -56,6 +56,21 @@ export class InMemoryRoomRepository implements IRoomRepository {
     return structuredClone(updated);
   }
 
+  /**
+   * Start a Room only while it is LOBBY, like RoomRepository's conditional
+   * UPDATE. A second start finds it IN_PROGRESS and gets null.
+   *
+   * @example
+   * await store.rooms.claimStart('ABC123', { status: 'IN_PROGRESS', round: 1 });
+   */
+  async claimStart(
+    roomCode: string,
+    startPatch: Partial<Room>
+  ): Promise<Room | null> {
+    if (this.tables.rooms.get(roomCode)?.status !== 'LOBBY') return null;
+    return await this.update(roomCode, startPatch);
+  }
+
   private toRoomListing(room: Room, hostUsername: string): RoomListing {
     const playerCount = this.tables.players.filter(
       row => row.roomCode === room.code
