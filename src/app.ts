@@ -19,11 +19,10 @@ import {
   serializerCompiler,
   validatorCompiler
 } from 'fastify-type-provider-zod';
-import type Redis from 'ioredis';
 import type { Logger } from 'pino';
 import type { GameModules } from './composition/game-modules';
 import { fastifyErrorHandler } from './http/error-handler';
-import { registerRateLimit } from './http/rate-limit';
+import { type RateLimitDeps, registerRateLimit } from './http/rate-limit';
 import { installHttpObservability } from './http/request-observability';
 import { authRoutes } from './http/routes/auth';
 import { type ReadinessProbes, checkRoutes } from './http/routes/checks';
@@ -55,8 +54,7 @@ export type AppModules = GameModules & {
   users: IUserRepository;
   readiness: ReadinessProbes;
   logger: Logger;
-  // Shared rate-limit counters; specs leave it out and count in memory.
-  rateLimitRedis?: Redis;
+  rateLimit?: RateLimitDeps;
 };
 
 /**
@@ -132,7 +130,7 @@ function registerPlugins(app: App, modules: AppModules): void {
   // Clients only send cursor positions upstream; cap frames well above those.
   app.register(fastifyWebsocket, { options: { maxPayload: 1024 } });
   app.register(fastifySensible);
-  registerRateLimit(app, modules.rateLimitRedis);
+  registerRateLimit(app, modules.rateLimit ?? {});
   app.register(fastifyCookie, {
     secret: env.COOKIE_SECRET,
     hook: 'onRequest',

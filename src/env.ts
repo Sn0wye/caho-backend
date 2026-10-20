@@ -21,6 +21,9 @@ export const env = createEnv({
     // Reverse proxies between the client and the API (Coolify's Traefik = 1).
     // 0 trusts none; use it when the API is reachable directly.
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
+    // Shared with the frontend's server so it can forward each player's IP for
+    // rate limiting (src/http/client-ip.ts). Unset: forwarded IPs are ignored.
+    FRONTEND_PROXY_SECRET: z.string().min(32).optional(),
     SEQ_URL: z.string().url().optional(),
     SEQ_API_KEY: z.string().min(1).optional(),
     LOG_LEVEL: z
@@ -34,6 +37,7 @@ export const env = createEnv({
   runtimeEnv: {
     ...process.env,
     COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || undefined,
+    FRONTEND_PROXY_SECRET: process.env.FRONTEND_PROXY_SECRET || undefined,
     SEQ_URL: process.env.SEQ_URL || undefined,
     SEQ_API_KEY: process.env.SEQ_API_KEY || undefined,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:

@@ -78,6 +78,9 @@ export function makeSessionUser(id: string): SessionUser {
   return { id, name: null, username: id, email: null, avatarUrl: null, providerId: null, providerUserId: null };
 }
 
+// What the frontend's server sends to prove a forwarded client IP is genuine.
+export const TEST_FRONTEND_PROXY_SECRET = 'test-frontend-proxy-secret-0123456789';
+
 export type TestApp = {
   app: App;
   store: InMemoryGameStore;
@@ -108,7 +111,8 @@ export async function buildTestApp(seed: GameSeed, userIds: string[] = []): Prom
     auth: new AuthService(users, new SessionService(new FakeSessionRepository(sessionUsers[0]))),
     users,
     readiness: { postgres: new FakeReadinessPostgres(), redis: new FakeReadinessRedis() },
-    logger: buildLogger({ consoleOutput: new FakeConsoleOutput() }).logger
+    logger: buildLogger({ consoleOutput: new FakeConsoleOutput() }).logger,
+    rateLimit: { frontendProxySecret: TEST_FRONTEND_PROXY_SECRET }
   });
   return { app, store, bus, users };
 }

@@ -1,5 +1,6 @@
 import { type App, buildApp } from '@/app';
 import { db } from '@/db';
+import { env } from '@/env';
 import { redis } from '@/db/redis';
 import { logger } from '@/lib/logger';
 import { Pubsub } from '@/lib/pub-sub';
@@ -41,7 +42,7 @@ export function buildProductionApp(): App {
     users,
     readiness: { postgres: db, redis },
     logger,
-    rateLimitRedis: redis
+    rateLimit: { redis, frontendProxySecret: env.FRONTEND_PROXY_SECRET }
   });
   app.addHook('onClose', () => pubsub.close());
   installRoundTimers(app, game.rounds);

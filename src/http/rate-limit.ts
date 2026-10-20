@@ -4,32 +4,32 @@ import {
   type RateLimitOptions,
   fastifyRateLimit
 } from '@fastify/rate-limit';
-import type { FastifyRequest } from 'fastify';
 import type Redis from 'ioredis';
+import { clientIpResolver } from './client-ip';
 
-// Default for every route, per client IP. Kept loose because the frontend's
-// SSR and server actions reach the API from Vercel egress IPs that many
-// players share.
+export type RateLimitDeps = {
+  // Shared counters across API instances; specs leave it out and count in memory.
+  redis?: Redis;
+  // Lets the frontend's server forward the player's IP. See client-ip.ts.
+  frontendProxySecret?: string;
+};
+
+// Default for every route, per client IP.
 const DEFAULT_RATE_LIMIT = { max: 300, timeWindow: '1 minute' };
 
 /**
- * Password sign-in/sign-up: 10 tries a minute per IP and username. Keyed on
- * both because those calls arrive from shared Vercel IPs, so an IP-only key
- * would lock out every player behind one. Runs in preHandler, after the body
- * is parsed and bounded.
+ * Password sign-in/sign-up: 10 tries a minute per client IP.
  *
  * @example
  * app.post('/sign-in', { config: { rateLimit: credentialRateLimit } }, signIn);
  */
 export const credentialRateLimit: RateLimitOptions = {
   max: 10,
-  timeWindow: '1 minute',
-  hook: 'preHandler',
-  keyGenerator: credentialAttemptKey
+  timeWindow: '1 minute'
 };
 
 /**
- * OAuth redirects and callbacks: browser-direct, so a plain per-IP key works.
+ * OAuth redirects and callbacks: 20 a minute per client IP.
  *
  * @example
  * app.get('/github', { config: { rateLimit: oauthRateLimit } }, redirect);
@@ -40,29 +40,18 @@ export const oauthRateLimit: RateLimitOptions = {
 };
 
 /**
- * The client IP plus the username the request names, if any.
+ * Applies DEFAULT_RATE_LIMIT to every route, keyed on the client IP (the one
+ * the frontend forwarded, when it proves it is the frontend). Counters live in
+ * Redis when given. Fails open: a Redis outage must not take sign-in down too.
  *
  * @example
- * credentialAttemptKey(req); // '203.0.113.7:neo'
+ * registerRateLimit(app, { redis, frontendProxySecret: env.FRONTEND_PROXY_SECRET });
  */
-export function credentialAttemptKey(req: FastifyRequest): string {
-  const body = req.body as { username?: unknown } | undefined;
-  const username = typeof body?.username === 'string' ? body.username : '';
-  return `${req.ip}:${username.toLowerCase()}`;
-}
-
-/**
- * Applies DEFAULT_RATE_LIMIT to every route. Counters live in Redis when
- * given, so every API instance shares them; specs pass none and count in
- * memory. Fails open: a Redis outage must not take sign-in down with it.
- *
- * @example
- * registerRateLimit(app, redis);
- */
-export function registerRateLimit(app: App, redis: Redis | undefined): void {
+export function registerRateLimit(app: App, deps: RateLimitDeps): void {
   app.register(fastifyRateLimit, {
     ...DEFAULT_RATE_LIMIT,
-    redis,
+    keyGenerator: clientIpResolver(deps.frontendProxySecret),
+    redis: deps.redis,
     nameSpace: `${CAHO_REDIS_PREFIX}rate-limit:`,
     skipOnError: true
   });
