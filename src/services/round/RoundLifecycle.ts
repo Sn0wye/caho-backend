@@ -18,6 +18,7 @@ import {
   type RoundTimerConfig
 } from './RoundDeadlines';
 import { parseDeadlineKey } from './deadlineKeys';
+import { reconcileRounds, stalledRotationStep } from './reconcileRounds';
 
 // The RoomService domain rules a Round leans on (ADR-0004: they return outcome
 // structs, the Round decides what follows): play validation and Hand refill,
@@ -193,28 +194,14 @@ export class RoundLifecycle {
     await this.abortAndRotate(round);
   }
 
-  // Startup backstop: advance every Round whose deadline passed while no
-  // subscriber was listening. The idempotent claims make it safe to run
-  // alongside a live subscriber.
+  // Backstop sweep (reconcileRounds): missed deadlines and dead rotations. The
+  // idempotent claims make it safe beside a live subscriber.
   public async reconcile(): Promise<void> {
-    const stale = await this.store.rounds.findExpiredActive(new Date());
-    this.log?.info(
-      {
-        event: 'round.reconciliation_started',
-        expiredRoundCount: stale.length
-      },
-      'Expired Round reconciliation started'
-    );
-    for (const round of stale) {
-      await this.advanceExpired(round);
-    }
-    this.log?.info(
-      {
-        event: 'round.reconciliation_completed',
-        expiredRoundCount: stale.length
-      },
-      'Expired Round reconciliation completed'
-    );
+    const recovery = {
+      advanceExpired: (round: Round) => this.advanceExpired(round),
+      resumeRotation: (round: Round) => this.resumeRotation(round)
+    };
+    await reconcileRounds(this.store.rounds, recovery, this.log);
   }
 
   // The game is ending (Host /end, or the Host left with no heir): abort the
@@ -397,6 +384,18 @@ export class RoundLifecycle {
       return;
     }
     await this.onPlayExpired(round);
+  }
+
+  // Finish a rotation that died after `ended` was claimed (stalledRotationStep).
+  private async resumeRotation(ended: Round): Promise<void> {
+    const room = await this.rules.getRoom(ended.roomCode);
+    const step = stalledRotationStep(room, ended);
+    if (step.kind === 'rotate') {
+      await this.rotateJudge(ended);
+      return;
+    }
+    const blackCard = await this.deck.drawBlackCard(room.code);
+    await this.openRound(room.code, room.round, step.judgeId, blackCard);
   }
 
   private async abortAndRotate(round: Round): Promise<void> {

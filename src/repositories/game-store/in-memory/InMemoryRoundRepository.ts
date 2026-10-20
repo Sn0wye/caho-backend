@@ -3,6 +3,7 @@ import type { IRoundRepository } from '@/repositories/round/IRoundRepository';
 import { type InMemoryGameTables, definedOnly } from './InMemoryGameTables';
 
 const ACTIVE_PHASES: RoundStatus[] = ['PLAYING', 'JUDGING'];
+const ENDED_PHASES: RoundStatus[] = ['COMPLETE', 'ABORTED'];
 
 function deadlineHasExpired(deadline: Date | null, now: Date): boolean {
   return deadline != null && deadline.getTime() <= now.getTime();
@@ -85,6 +86,32 @@ export class InMemoryRoundRepository implements IRoundRepository {
           deadlineHasExpired(round.judgeDeadline, now)
       )
       .map(round => structuredClone(round));
+  }
+
+  /**
+   * COMPLETE/ABORTED Rounds of an IN_PROGRESS Room, ended at or before
+   * `endedBefore`, with no Round numbered after them.
+   *
+   * @example
+   * const stalled = await store.rounds.findStalledEnded(new Date(Date.now() - 15_000));
+   */
+  async findStalledEnded(endedBefore: Date): Promise<Round[]> {
+    return [...this.tables.rounds.values()]
+      .filter(round => ENDED_PHASES.includes(round.status))
+      .filter(round => round.updatedAt.getTime() <= endedBefore.getTime())
+      .filter(
+        round => this.tables.rooms.get(round.roomCode)?.status === 'IN_PROGRESS'
+      )
+      .filter(round => !this.hasNextRound(round))
+      .map(round => structuredClone(round));
+  }
+
+  private hasNextRound(round: Round): boolean {
+    return [...this.tables.rounds.values()].some(
+      other =>
+        other.roomCode === round.roomCode &&
+        other.roundNumber === round.roundNumber + 1
+    );
   }
 
   private assertUnique(round: Round): void {

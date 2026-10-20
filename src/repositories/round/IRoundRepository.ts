@@ -20,4 +20,9 @@ export interface IRoundRepository {
   // judge-deadline has already passed at `now`, used at startup to advance any
   // Round whose expiry event fired while no subscriber was listening.
   findExpiredActive(now: Date): Promise<Round[]>;
+
+  // Backstop sweep source: the latest Round of an IN_PROGRESS Room that ended
+  // (COMPLETE/ABORTED) at or before `endedBefore` with no next Round opened, i.e.
+  // a rotation that died between the claim and openRound.
+  findStalledEnded(endedBefore: Date): Promise<Round[]>;
 }

@@ -88,4 +88,28 @@ describe('subscribeRoundExpiry', () => {
       await harness.close();
     }
   });
+
+  it('reports a reconnect only after the connection dropped', async () => {
+    const redis = new FakeRedisPubsub();
+    const { logger } = buildLogger({ consoleOutput: new FakeConsoleOutput() });
+    let reconnects = 0;
+    const cleanup = await subscribeRoundExpiry(
+      redis as unknown as Redis,
+      new FakeRoundExpiryDriver(),
+      logger,
+      0,
+      () => {
+        reconnects += 1;
+      }
+    );
+    const subscriber = redis.connections[0];
+
+    subscriber.emit('ready');
+    subscriber.emit('reconnecting', 100);
+    subscriber.emit('ready');
+    subscriber.emit('ready');
+
+    expect(reconnects).toBe(1);
+    await cleanup();
+  });
 });

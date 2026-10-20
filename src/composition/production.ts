@@ -3,12 +3,12 @@ import { db } from '@/db';
 import { redis } from '@/db/redis';
 import { logger } from '@/lib/logger';
 import { Pubsub } from '@/lib/pub-sub';
-import { traceBackground } from '@/lib/tracing';
 import { PostgresGameStoreFactory } from '@/repositories/game-store/PostgresGameStore';
 import { UserRepositoryFactory } from '@/repositories/user';
 import { AuthService } from '@/services/auth/AuthService';
 import { SessionServiceFactory } from '@/services/auth/SessionServiceFactory';
 import type { RoundLifecycle } from '@/services/round/RoundLifecycle';
+import { RoundReconcileSchedule } from '@/services/round/RoundReconcileSchedule';
 import { RoundTimerStore } from '@/services/round/RoundTimerStore';
 import { ensureExpiryNotifications } from '@/services/round/ensureExpiryNotifications';
 import { subscribeRoundExpiry } from '@/services/round/subscribeRoundExpiry';
@@ -50,20 +50,25 @@ export function buildProductionApp(): App {
 // Round timer engine (ADR-0003 / issue #4): on boot, sweep any Round whose
 // deadline lapsed while the process was down, then subscribe to Redis expired-key
 // events to advance Rounds live. The sweep runs before the subscriber so a missed
-// event and a fresh event can't race.
+// event and a fresh event can't race. Expiry events are fire-and-forget, so the
+// sweep then repeats every 30s and after each subscriber reconnect.
 function installRoundTimers(app: App, rounds: RoundLifecycle): void {
+  const reconcile = new RoundReconcileSchedule(rounds, logger);
   let unsubscribe: (() => Promise<void>) | null = null;
   app.addHook('onReady', async () => {
     await ensureExpiryNotifications(redis, logger);
-    await traceBackground('round.reconcile', {}, () => rounds.reconcile());
+    await reconcile.runNow('startup');
     unsubscribe = await subscribeRoundExpiry(
       redis,
       rounds,
       logger,
-      redis.options.db ?? 0
+      redis.options.db ?? 0,
+      () => reconcile.request('redis_reconnect')
     );
+    reconcile.start();
   });
   app.addHook('onClose', async () => {
+    await reconcile.stop();
     await unsubscribe?.();
   });
 }
