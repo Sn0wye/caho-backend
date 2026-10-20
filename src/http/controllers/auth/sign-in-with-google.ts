@@ -2,6 +2,7 @@ import type { App } from '@/app';
 import type { AuthModules } from '@/http/routes/auth';
 import { BadRequestError } from '@/errors';
 import { z } from 'zod';
+import { oauthRateLimit } from '@/http/rate-limit';
 
 export const signInWithGoogle = async (
   app: App,
@@ -10,6 +11,7 @@ export const signInWithGoogle = async (
   app.get(
     '/google',
     {
+      config: { rateLimit: oauthRateLimit },
       schema: {
         tags: ['Auth'],
         summary: 'Sign in with Google OAuth'
@@ -38,6 +40,7 @@ export const signInWithGoogle = async (
   app.get(
     '/google/callback',
     {
+      config: { rateLimit: oauthRateLimit },
       schema: {
         tags: ['Auth'],
         summary: 'Google OAuth Callback',

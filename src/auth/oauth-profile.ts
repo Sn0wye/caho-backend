@@ -1,9 +1,10 @@
+import { USERNAME_MAX_LENGTH } from '@/contracts/credentials';
+
 // Turns an OAuth provider's identity into the fields a CAHO user needs. Google
 // has no handle, so its username comes from the email; GitHub's login is used
 // as-is. Either may already belong to someone else, so the final username is
 // claimed against the users table with a numeric suffix.
 
-const USERNAME_MAX_LENGTH = 255;
 const FALLBACK_USERNAME = 'player';
 
 export type GithubEmail = {

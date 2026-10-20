@@ -2,6 +2,7 @@ import type { App } from '@/app';
 import type { AuthModules } from '@/http/routes/auth';
 import { BadRequestError } from '@/errors';
 import { z } from 'zod';
+import { oauthRateLimit } from '@/http/rate-limit';
 
 export const signInWithGithub = async (
   app: App,
@@ -10,6 +11,7 @@ export const signInWithGithub = async (
   app.get(
     '/github',
     {
+      config: { rateLimit: oauthRateLimit },
       schema: {
         tags: ['Auth'],
         summary: 'Sign in with GitHub OAuth'
@@ -32,6 +34,7 @@ export const signInWithGithub = async (
   app.get(
     '/github/callback',
     {
+      config: { rateLimit: oauthRateLimit },
       schema: {
         tags: ['Auth'],
         summary: 'GitHub OAuth Callback',

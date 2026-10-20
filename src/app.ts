@@ -22,6 +22,7 @@ import {
 import type { Logger } from 'pino';
 import type { GameModules } from './composition/game-modules';
 import { fastifyErrorHandler } from './http/error-handler';
+import { type RateLimitDeps, registerRateLimit } from './http/rate-limit';
 import { installHttpObservability } from './http/request-observability';
 import { authRoutes } from './http/routes/auth';
 import { type ReadinessProbes, checkRoutes } from './http/routes/checks';
@@ -53,6 +54,7 @@ export type AppModules = GameModules & {
   users: IUserRepository;
   readiness: ReadinessProbes;
   logger: Logger;
+  rateLimit?: RateLimitDeps;
 };
 
 /**
@@ -68,7 +70,11 @@ export function buildApp(modules: AppModules): App {
     logger: modules.logger as FastifyBaseLogger,
     disableRequestLogging: true,
     // Do not accept arbitrary client request IDs as log properties.
-    requestIdHeader: false
+    requestIdHeader: false,
+    // Coolify's Traefik sits in front, so the socket peer is the proxy. Trust
+    // only its hops: request.ip becomes the address Traefik saw, and a client
+    // can't spoof it with its own X-Forwarded-For.
+    trustProxy: env.TRUST_PROXY_HOPS
   }).withTypeProvider<ZodTypeProvider>();
 
   installHttpObservability(app);
@@ -121,8 +127,10 @@ function registerPlugins(app: App, modules: AppModules): void {
         : ['http://localhost:3000'],
     credentials: true
   });
-  app.register(fastifyWebsocket);
+  // Clients only send cursor positions upstream; cap frames well above those.
+  app.register(fastifyWebsocket, { options: { maxPayload: 1024 } });
   app.register(fastifySensible);
+  registerRateLimit(app, modules.rateLimit ?? {});
   app.register(fastifyCookie, {
     secret: env.COOKIE_SECRET,
     hook: 'onRequest',
