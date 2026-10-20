@@ -40,7 +40,8 @@ export function buildProductionApp(): App {
     auth: new AuthService(users, sessions),
     users,
     readiness: { postgres: db, redis },
-    logger
+    logger,
+    rateLimitRedis: redis
   });
   app.addHook('onClose', () => pubsub.close());
   installRoundTimers(app, game.rounds);

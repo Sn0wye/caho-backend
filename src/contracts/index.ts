@@ -10,3 +10,4 @@ export * from './ws';
 export * from './list-rooms';
 export * from './update-profile';
 export * from './get-room-players';
+export * from './credentials';

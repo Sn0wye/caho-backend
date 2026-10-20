@@ -1,11 +1,12 @@
 import { type UserSchema, userSchema } from '@/schemas';
 import { z } from 'zod';
+import { USERNAME_MAX_LENGTH } from './credentials';
 
 export const updateProfileRequest = z.object({
   avatarUrl: z.string().url().nullable(),
   // Password accounts start without an email, so it stays optional.
   email: z.string().trim().email().nullable(),
-  username: z.string().trim().min(1).max(255)
+  username: z.string().trim().min(1).max(USERNAME_MAX_LENGTH)
 });
 
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequest>;

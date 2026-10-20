@@ -3,6 +3,7 @@ import type { AuthService } from '@/services/auth/AuthService';
 import { signInRequest, signInResponse } from '@/contracts';
 import { UnauthorizedError } from '@/errors';
 import { errorSchema } from '@/schemas';
+import { credentialRateLimit } from '@/http/rate-limit';
 
 export const signInController = async (
   app: App,
@@ -11,6 +12,7 @@ export const signInController = async (
   app.post(
     '/sign-in',
     {
+      config: { rateLimit: credentialRateLimit },
       schema: {
         tags: ['Auth'],
         summary: 'Sign in with username & password',

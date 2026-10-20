@@ -1,9 +1,10 @@
 import { userSchema } from '@/schemas';
 import { z } from 'zod';
+import { passwordField, usernameField } from './credentials';
 
 export const signUpRequest = z.object({
-  username: z.string().min(1),
-  password: z.string().min(8)
+  username: usernameField,
+  password: passwordField
 });
 
 export type SignUpRequest = z.infer<typeof signUpRequest>;

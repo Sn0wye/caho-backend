@@ -105,3 +105,15 @@ describe('WS /ws/:userId', () => {
     });
   });
 });
+
+describe('WS frame size', () => {
+  it('closes the socket with 1009 when a frame exceeds 1024 bytes', async () => {
+    harness = await buildTestApp({ room: makeRoom(), players: [makePlayer({ id: PLAYER_ID })] });
+    const { socket } = await connect(`/room/${ROOM_CODE}`);
+    const closed = new Promise<number>(resolve => socket.once('close', resolve));
+
+    socket.send('x'.repeat(1025));
+
+    expect(await closed).toBe(1009);
+  });
+});

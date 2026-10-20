@@ -2,6 +2,7 @@ import type { App } from '@/app';
 import type { AuthModules } from '@/http/routes/auth';
 import { signUpRequest, signUpResponse } from '@/contracts';
 import { errorSchema } from '@/schemas';
+import { credentialRateLimit } from '@/http/rate-limit';
 
 export const signUpController = async (
   app: App,
@@ -10,6 +11,7 @@ export const signUpController = async (
   app.post(
     '/sign-up',
     {
+      config: { rateLimit: credentialRateLimit },
       schema: {
         tags: ['Auth'],
         summary: 'Sign up with username & password',

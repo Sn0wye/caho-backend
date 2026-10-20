@@ -18,6 +18,9 @@ export const env = createEnv({
     // Parent domain shared with the frontend (e.g. caho.com.br), so the session
     // cookie OAuth callbacks set here also reaches the frontend's server.
     COOKIE_DOMAIN: z.string().min(1).optional(),
+    // Reverse proxies between the client and the API (Coolify's Traefik = 1).
+    // 0 trusts none; use it when the API is reachable directly.
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(1),
     SEQ_URL: z.string().url().optional(),
     SEQ_API_KEY: z.string().min(1).optional(),
     LOG_LEVEL: z
