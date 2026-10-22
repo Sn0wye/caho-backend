@@ -31,6 +31,7 @@ export function describeGameStoreContract(harness: GameStoreHarness): void {
     describePlayedCards(harness);
     describePhaseClaim(harness);
     describeExpiredActive(harness);
+    describeStalledEnded(harness);
     describeCardDraws(harness);
     describeRoomsAndPlayers(harness);
     describeRaceGuards(harness);
@@ -297,6 +298,68 @@ function describeExpiredActive(harness: GameStoreHarness): void {
     const expired = await store.rounds.findExpiredActive(now);
 
     expect(expired.map(round => round.id)).toEqual(['round-1']);
+  });
+}
+
+// The rotation backstop's source: an ended Round of a live Room whose next
+// Round never opened, once it has been ended long enough not to be mid-rotation.
+function describeStalledEnded(harness: GameStoreHarness): void {
+  const cutoff = new Date('2026-01-01T12:00:00Z');
+  const before = new Date('2026-01-01T11:59:00Z');
+  const after = new Date('2026-01-01T12:01:00Z');
+
+  it('returns ended Rounds with no next Round, ended by the cutoff', async () => {
+    const store = await openWithRounds(harness, [
+      makeRound({
+        id: 'rotated',
+        roundNumber: 1,
+        status: 'COMPLETE',
+        updatedAt: before
+      }),
+      makeRound({
+        id: 'stuck',
+        roundNumber: 2,
+        status: 'ABORTED',
+        updatedAt: before
+      })
+    ]);
+
+    const stalled = await store.rounds.findStalledEnded(cutoff);
+
+    expect(stalled.map(round => round.id)).toEqual(['stuck']);
+  });
+
+  it('skips active Rounds and Rounds ended after the cutoff', async () => {
+    const store = await openWithRounds(harness, [
+      makeRound({
+        id: 'live',
+        roundNumber: 1,
+        status: 'PLAYING',
+        updatedAt: before
+      }),
+      makeRound({
+        id: 'fresh',
+        roundNumber: 2,
+        status: 'COMPLETE',
+        updatedAt: after
+      })
+    ]);
+
+    expect(await store.rounds.findStalledEnded(cutoff)).toEqual([]);
+  });
+
+  it('skips the last Round of a finished Room', async () => {
+    const store = await harness.open();
+    await seedGame(
+      store,
+      {
+        room: makeRoom({ status: 'FINISHED' }),
+        rounds: [makeRound({ status: 'COMPLETE', updatedAt: before })]
+      },
+      harness.users
+    );
+
+    expect(await store.rounds.findStalledEnded(cutoff)).toEqual([]);
   });
 }
 

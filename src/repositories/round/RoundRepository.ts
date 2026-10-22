@@ -1,8 +1,11 @@
 import { db } from '@/db';
 import type { IRoundRepository } from './IRoundRepository';
 import type { Round, RoundStatus } from '@/schemas';
-import { rounds } from '@/db/schema';
-import { and, eq, inArray, lte, or } from 'drizzle-orm';
+import { rooms, rounds } from '@/db/schema';
+import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+
+const nextRounds = alias(rounds, 'next_rounds');
 
 export class RoundRepository implements IRoundRepository {
   private db: typeof db;
@@ -73,5 +76,29 @@ export class RoundRepository implements IRoundRepository {
           or(lte(rounds.playDeadline, now), lte(rounds.judgeDeadline, now))
         )
       );
+  }
+
+  // Ended Rounds whose successor never opened: anti-join on round_number + 1.
+  public async findStalledEnded(endedBefore: Date): Promise<Round[]> {
+    const rows = await this.db
+      .select({ round: rounds })
+      .from(rounds)
+      .innerJoin(rooms, eq(rooms.code, rounds.roomCode))
+      .leftJoin(
+        nextRounds,
+        and(
+          eq(nextRounds.roomCode, rounds.roomCode),
+          eq(nextRounds.roundNumber, sql`${rounds.roundNumber} + 1`)
+        )
+      )
+      .where(
+        and(
+          inArray(rounds.status, ['COMPLETE', 'ABORTED']),
+          eq(rooms.status, 'IN_PROGRESS'),
+          lte(rounds.updatedAt, endedBefore),
+          isNull(nextRounds.id)
+        )
+      );
+    return rows.map(row => row.round);
   }
 }

@@ -13,15 +13,19 @@ export type RoundExpiryDriver = Pick<RoundLifecycle, 'onExpired'>;
 
 // Subscribe to expired-key events on a dedicated connection (a subscribed ioredis
 // client can't run other commands) and hand each expired key to the Round lifecycle.
-// Returns an unsubscribe to release the connection on shutdown. See issue #4.
+// `onReconnected` runs once the connection is back after a drop: events expired
+// while it was down are lost, so the caller sweeps. Returns an unsubscribe to
+// release the connection on shutdown. See issue #4.
 export async function subscribeRoundExpiry(
   redis: Redis,
   rounds: RoundExpiryDriver,
   log: Logger,
-  db = 0
+  db = 0,
+  onReconnected: () => void = () => {}
 ): Promise<() => Promise<void>> {
   const sub = redis.duplicate();
   const pending = listenRoundExpiry(sub, rounds, log);
+  watchReconnects(sub, onReconnected);
   const cleanup = await openRedisSubscription(
     sub,
     expiredChannel(db),
@@ -35,6 +39,20 @@ export async function subscribeRoundExpiry(
       await Promise.all(pending);
     }
   };
+}
+
+// ioredis emits `ready` on the first connect too, so only a `ready` after a
+// `reconnecting` counts. ioredis resubscribes by itself on reconnect.
+function watchReconnects(subscriber: Redis, onReconnected: () => void): void {
+  let dropped = false;
+  subscriber.on('reconnecting', () => {
+    dropped = true;
+  });
+  subscriber.on('ready', () => {
+    if (!dropped) return;
+    dropped = false;
+    onReconnected();
+  });
 }
 
 function listenRoundExpiry(
