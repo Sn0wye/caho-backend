@@ -40,7 +40,7 @@ describe('CursorInbox', () => {
     expect(events()).toEqual([
       {
         event: 'room.cursor-move',
-        payload: { playerId: 'player-a', x: 0.5, y: -0.5 }
+        payload: { playerId: 'player-a', x: 0.5, y: -0.5, card: null }
       },
       { event: 'room.cursor-leave', payload: { playerId: 'player-a' } }
     ]);
@@ -69,8 +69,8 @@ describe('CursorInbox', () => {
     clock.at += 1;
     inbox.receive(move(0.2, 0));
     expect(events().map(event => event.payload)).toEqual([
-      { playerId: 'player-a', x: 0, y: 0 },
-      { playerId: 'player-a', x: 0.2, y: 0 }
+      { playerId: 'player-a', x: 0, y: 0, card: null },
+      { playerId: 'player-a', x: 0.2, y: 0, card: null }
     ]);
   });
 
@@ -81,6 +81,9 @@ describe('CursorInbox', () => {
     inbox.receive(JSON.stringify({ event: 'room.started', payload: {} }));
     inbox.receive(move(5, 0));
     inbox.receive(JSON.stringify({ event: 'cursor.move', payload: { x: 'a' } }));
+    for (const card of [-1, 20, 1.5]) {
+      inbox.receive(JSON.stringify({ event: 'cursor.move', payload: { x: 0, y: 0, card } }));
+    }
     expect(events()).toEqual([]);
   });
 

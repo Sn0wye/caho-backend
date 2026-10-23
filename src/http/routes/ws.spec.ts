@@ -60,10 +60,10 @@ describe('WS /ws/room/:roomCode cursors', () => {
     await vi.waitFor(() => expect(harness.bus.subscriberCount(ROOM_CODE)).toBe(2));
 
     await vi.waitFor(() => {
-      sender.socket.send(JSON.stringify({ event: 'cursor.move', payload: { x: 0.5, y: -0.5 } }));
+      sender.socket.send(JSON.stringify({ event: 'cursor.move', payload: { x: 0.5, y: -0.5, card: 2 } }));
       expect(cursorEvents(watcher.received)[0]).toEqual({
         event: 'room.cursor-move',
-        payload: { playerId: PLAYER_ID, x: 0.5, y: -0.5 }
+        payload: { playerId: PLAYER_ID, x: 0.5, y: -0.5, card: 2 }
       });
     });
     sender.socket.close();
