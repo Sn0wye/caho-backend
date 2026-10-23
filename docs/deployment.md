@@ -66,7 +66,12 @@ The override does not receive `SEQ_API_KEY`; use
 Successful health probes stay quiet. Repeated outage logs are capped at one per
 30 seconds per event/dependency or connection, with repeat counts and recovery
 logging. Export failures write to stdout. Shutdown drains connections and export
-buffers, with a ten-second deadline.
+buffers, with a ten-second deadline. An uncaught exception or unhandled
+rejection logs `process.uncaught_exception` / `process.unhandled_rejection` at
+fatal, runs the same drain, and exits with code 1.
 
 Verify a request log opens its trace in Seq. Measure daily storage growth before
 choosing retention or reducing sampling.
+
+Worth alerting on: `http.request_completed` with `statusCode >= 500`,
+`round.expiry_failed`, and fatal `process.*` crash events.

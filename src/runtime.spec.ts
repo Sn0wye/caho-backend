@@ -91,4 +91,38 @@ describe('runServer', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(process.exits).toEqual([1]);
   });
+
+  it('logs an uncaught exception, drains and exits with failure', async () => {
+    const { runtime, resources, process, output } = buildRuntime(listening);
+    await runServer(runtime);
+    process.crash('uncaughtException', new Error('boom'));
+    await vi.waitFor(() => expect(process.exits).toEqual([1]));
+    expect(resources.closed).toHaveLength(5);
+    expect(JSON.parse(output.lines[1])).toMatchObject({
+      level: 60,
+      event: 'process.uncaught_exception',
+      err: { message: 'boom' }
+    });
+  });
+
+  it('wraps a non-Error rejection reason and drains once on repeats', async () => {
+    const { runtime, resources, process, output } = buildRuntime(listening);
+    await runServer(runtime);
+    process.crash('unhandledRejection', 'nope');
+    process.crash('unhandledRejection', 'again');
+    await vi.waitFor(() => expect(process.exits).toEqual([1]));
+    expect(resources.closed).toHaveLength(5);
+    expect(JSON.parse(output.lines[1])).toMatchObject({
+      event: 'process.unhandled_rejection',
+      err: { message: 'Non-Error crash reason: nope' }
+    });
+  });
+
+  it('exits with failure after a crash even when cleanup succeeds', async () => {
+    const { runtime, process } = buildRuntime(listening);
+    await runServer(runtime);
+    process.crash('uncaughtException', new Error('boom'));
+    process.signal('SIGTERM');
+    await vi.waitFor(() => expect(process.exits).toEqual([1]));
+  });
 });

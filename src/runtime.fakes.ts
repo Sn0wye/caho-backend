@@ -1,4 +1,9 @@
-import type { ServerProcess, ServerResources } from './runtime';
+import type {
+  CrashEvent,
+  ServerProcess,
+  ServerResources,
+  ShutdownSignal
+} from './runtime';
 
 export class FakeServerResources implements ServerResources {
   readonly closed: string[] = [];
@@ -34,18 +39,32 @@ export class FakeServerProcess implements ServerProcess {
   exitCode?: number | string | null;
   readonly exits: number[] = [];
   private readonly listeners = new Map<string, () => void>();
+  private readonly crashListeners = new Map<
+    CrashEvent,
+    (reason: unknown) => void
+  >();
 
   exit(code: number): void {
     this.exits.push(code);
   }
 
-  once(signal: 'SIGTERM' | 'SIGINT', listener: () => void): this {
+  once(signal: ShutdownSignal, listener: () => void): this {
     this.listeners.set(signal, listener);
     return this;
   }
 
+  on(event: CrashEvent, listener: (reason: unknown) => void): this {
+    this.crashListeners.set(event, listener);
+    return this;
+  }
+
+  /** Raise a crash like Node would; `on` listeners fire on every crash. */
+  crash(event: CrashEvent, reason: unknown): void {
+    this.crashListeners.get(event)?.(reason);
+  }
+
   /** Deliver a signal like the OS would; `once` listeners fire at most once. */
-  signal(signal: 'SIGTERM' | 'SIGINT'): void {
+  signal(signal: ShutdownSignal): void {
     const listener = this.listeners.get(signal);
     this.listeners.delete(signal);
     listener?.();
